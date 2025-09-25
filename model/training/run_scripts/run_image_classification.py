@@ -292,6 +292,10 @@ def main():
         """Computes accuracy on a batch of predictions"""
         return metric.compute(predictions=np.argmax(p.predictions, axis=1), references=p.label_ids)
 
+    # TODO: Define custom loss calculation
+    def compute_loss_func(outputs, labels: Optional[torch.Tensor] = None, num_items_in_batch: Optional[torch.Tensor] = None) -> float:
+        return 0.0
+
     config = AutoConfig.from_pretrained(
         model_args.config_name or model_args.model_name_or_path,
         num_labels=len(labels),
@@ -395,6 +399,7 @@ def main():
         train_dataset=dataset["train"] if training_args.do_train else None,
         eval_dataset=dataset["validation"] if training_args.do_eval else None,
         compute_metrics=compute_metrics,
+        compute_loss_func=compute_loss_func,
         processing_class=image_processor,
         data_collator=collate_fn,
     )

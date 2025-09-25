@@ -1,0 +1,26 @@
+python run_image_classification.py \
+    --model_name_or_path TBD \
+    --dataset_name TBD \
+    --image_column_name image \
+    --label_column_name label \
+    --remove_unused_columns False \
+    --output_dir TBD \
+    --overwrite_output_dir \
+    --max_steps 100 \
+    --learning_rate 2e-5 \
+    --per_device_train_batch_size 8 \
+    --per_device_eval_batch_size 8 \
+    --gradient_accumulation_steps 1 \
+    --logging_strategy steps \
+    --logging_steps 10 \
+    --eval_strategy steps \
+    --eval_steps 10 \
+    --save_strategy steps \
+    --save_steps 50 \
+    --save_total_limit 3 \
+    --load_best_model_at_end True \
+    --do_train \
+    --do_eval \
+    --fp16 \
+    --dataloader_num_workers 4 \
+    --seed 42
