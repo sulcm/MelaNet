@@ -5,6 +5,8 @@ Fine-tuning a 🤗 Transformers model for image classification.
 Modified version of file located at: https://github.com/huggingface/transformers/blob/main/examples/pytorch/image-classification/run_image_classification.py
 """
 
+# TODO: This tag signifies change or need for behavior control
+
 import os
 import sys
 import logging
@@ -280,6 +282,7 @@ def main():
         label2id[label] = str(i)
         id2label[str(i)] = label
 
+    # TODO: Add metric comutation
     # Load the accuracy metric from the datasets package
     metric = evaluate.load("accuracy", cache_dir=model_args.cache_dir)
 
@@ -318,6 +321,7 @@ def main():
         trust_remote_code=model_args.trust_remote_code,
     )
 
+    # TODO: Make sure that images are not preprocessed multiple times (here and then in model image processor)
     # Define torchvision transforms to be applied to each image.
     if isinstance(image_processor, TimmWrapperImageProcessor):
         _train_transforms = image_processor.train_transforms
