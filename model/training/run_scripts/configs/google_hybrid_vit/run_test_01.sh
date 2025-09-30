@@ -1,10 +1,10 @@
 python run_image_classification.py \
-    --model_name_or_path TBD \
-    --dataset_name TBD \
+    --model_name_or_path /home/sulcm/models/melanet/google_hybrid_cnn_vit/base \
+    --dataset_name /home/sulcm/datasets/milk10k/milk10k \
     --image_column_name image \
     --label_column_name label \
     --remove_unused_columns False \
-    --output_dir TBD \
+    --output_dir /home/sulcm/models/melanet/google_hybrid_cnn_vit/melanet_test_01 \
     --overwrite_output_dir \
     --max_steps 100 \
     --learning_rate 2e-5 \

@@ -19,7 +19,7 @@ from typing import Optional
 from dataclasses import dataclass, field
 
 from PIL import Image
-from datasets import load_dataset
+from datasets import load_dataset, load_from_disk
 from torchvision.transforms import (
     CenterCrop,
     Compose,
@@ -36,6 +36,8 @@ from transformers import (
     AutoImageProcessor,
     AutoModelForImageClassification,
     HfArgumentParser,
+    ViTHybridImageProcessor,
+    ViTHybridForImageClassification,
     TimmWrapperImageProcessor,
     Trainer,
     TrainingArguments,
@@ -229,13 +231,18 @@ def main():
 
     # Initialize our dataset and prepare it for the 'image-classification' task.
     if data_args.dataset_name is not None:
-        dataset = load_dataset(
-            data_args.dataset_name,
-            data_args.dataset_config_name,
-            cache_dir=model_args.cache_dir,
-            token=model_args.token,
-            trust_remote_code=model_args.trust_remote_code,
-        )
+        if os.path.exists(data_args.dataset_name):
+            dataset = load_from_disk(
+                dataset_path=data_args.dataset_name
+            )
+        else:
+            dataset = load_dataset(
+                data_args.dataset_name,
+                data_args.dataset_config_name,
+                cache_dir=model_args.cache_dir,
+                token=model_args.token,
+                trust_remote_code=model_args.trust_remote_code,
+            )
     else:
         data_files = {}
         if data_args.train_dir is not None:
@@ -330,6 +337,12 @@ def main():
     if isinstance(image_processor, TimmWrapperImageProcessor):
         _train_transforms = image_processor.train_transforms
         _val_transforms = image_processor.val_transforms
+    elif isinstance(image_processor, ViTHybridImageProcessor):
+        def hybrid_vit_transform(images):
+            return image_processor(images=images, return_tensors="pt").get("pixel_values")[0]
+
+        _train_transforms = hybrid_vit_transform
+        _val_transforms = hybrid_vit_transform
     else:
         if "shortest_edge" in image_processor.size:
             size = image_processor.size["shortest_edge"]
@@ -399,7 +412,7 @@ def main():
         train_dataset=dataset["train"] if training_args.do_train else None,
         eval_dataset=dataset["validation"] if training_args.do_eval else None,
         compute_metrics=compute_metrics,
-        compute_loss_func=compute_loss_func,
+        # compute_loss_func=compute_loss_func,
         processing_class=image_processor,
         data_collator=collate_fn,
     )
