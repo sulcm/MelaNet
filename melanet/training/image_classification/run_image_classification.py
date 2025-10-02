@@ -14,9 +14,12 @@ import transformers
 import torch
 import evaluate
 import numpy as np
+import torch.nn.functional as F
 
-from typing import Optional
+from typing import cast, Optional, Union, Callable, Literal
 from dataclasses import dataclass, field
+from functools import partial
+from collections import Counter
 
 from PIL import Image
 from datasets import load_dataset, load_from_disk
@@ -37,15 +40,16 @@ from transformers import (
     AutoModelForImageClassification,
     HfArgumentParser,
     ViTHybridImageProcessor,
-    ViTHybridForImageClassification,
     TimmWrapperImageProcessor,
     Trainer,
     TrainingArguments,
     set_seed,
 )
 from transformers.trainer_utils import get_last_checkpoint
-from transformers.utils import check_min_version, send_example_telemetry
-from transformers.utils.versions import require_version
+# from transformers.utils import check_min_version, send_example_telemetry
+# from transformers.utils.versions import require_version
+
+from loss_functions.focal_loss import FocalLoss
 
 
 logger = logging.getLogger(__name__)
@@ -170,18 +174,57 @@ class ModelArguments:
     )
 
 
+@dataclass
+class AuxiliaryArguments:
+    """
+    Auxiliary arguments to specify/define for model/data/training
+    """
+    # Loss
+    ## CE
+    ce_loss_multiplier: float = field(
+        default=1.0,
+        metadata={"help": "Value that multiplies CE loss"}
+    )
+    ## Focal
+    focal_loss_multiplier: float = field(
+        default=1.0,
+        metadata={"help": "Value that multiplies Focal loss"}
+    )
+    focal_loss_task: Literal["binary", "multiclass", "multilabel"] = field(
+        default="multiclass",
+        metadata={"help": "Fine-tuning task such as 'binary', 'multiclass', or 'multilabel'"}
+    )
+    focal_loss_gamma: float = field(
+        default=2.0,
+        metadata={"help": (
+            "Controls how much to down-weight easy examples."
+            " Defaults to `2.0`"
+            " as in original [paper](https://openaccess.thecvf.com/content_iccv_2017/html/Lin_Focal_Loss_for_ICCV_2017_paper.html)."
+        )}
+    )
+    focal_loss_alpha: Optional[float] = field(
+        default=None,
+        metadata={"help": (
+            "Balances positive vs. negative classes weights."
+            " Enter single weight using floating point number (usually `[0.25, 0.75]`)."
+            " If `-1` entered then weights are auto selected. For binary task is alpha set to `0.25` otherwise list of inverse frequencies of classes is used."
+            " Defaults to `None`."
+        )}
+    )
+
+
 def main():
     # See all possible arguments in src/transformers/training_args.py
     # or by passing the --help flag to this script.
     # We now keep distinct sets of args, for a cleaner separation of concerns.
-
-    parser = HfArgumentParser((ModelArguments, DataTrainingArguments, TrainingArguments))
+    parser = HfArgumentParser((ModelArguments, DataTrainingArguments, TrainingArguments, AuxiliaryArguments))
     if len(sys.argv) == 2 and sys.argv[1].endswith(".json"):
         # If we pass only one argument to the script and it's the path to a json file,
         # let's parse it to get our arguments.
-        model_args, data_args, training_args = parser.parse_json_file(json_file=os.path.abspath(sys.argv[1]))
+        parsed_args = parser.parse_json_file(json_file=os.path.abspath(sys.argv[1]))
     else:
-        model_args, data_args, training_args = parser.parse_args_into_dataclasses()
+        parsed_args = parser.parse_args_into_dataclasses()
+    model_args, data_args, training_args, aux_args = cast(tuple[ModelArguments, DataTrainingArguments, TrainingArguments, AuxiliaryArguments], parsed_args)
 
     # Sending telemetry. Tracking the example usage helps us better allocate resources to maintain them. The
     # information sent is the one passed as arguments along with your Python/PyTorch versions.
@@ -290,18 +333,70 @@ def main():
         id2label[str(i)] = label
 
     # TODO: Add metric comutation
-    # Load the accuracy metric from the datasets package
-    metric = evaluate.load("accuracy", cache_dir=model_args.cache_dir)
+    # Load selected metrics from the datasets package
+    metrics: dict[str, Callable] = {
+        "f1": partial(evaluate.load("f1", "multiclass").compute, average="weighted"),
+        "precision": partial(evaluate.load("precision", "multiclass").compute, average="weighted"),
+        "recall": partial(evaluate.load("recall", "multiclass").compute, average="weighted"),
+        "accuracy": evaluate.load("accuracy", "multiclass").compute,
+        "roc_auc": partial(evaluate.load("roc_auc", "multiclass").compute, average="weighted"),
+    }
 
     # Define our compute_metrics function. It takes an `EvalPrediction` object (a namedtuple with a
     # predictions and label_ids field) and has to return a dictionary string to float.
     def compute_metrics(p):
         """Computes accuracy on a batch of predictions"""
-        return metric.compute(predictions=np.argmax(p.predictions, axis=1), references=p.label_ids)
+        preds = np.argmax(p.predictions, axis=-1)
+        probs = F.softmax(torch.tensor(p.predictions), dim=-1).numpy()
+        refs = p.label_ids
+
+        results = {}
+        for metric_name, metric in metrics.items():
+            if metric_name == "roc_auc":
+                _res = metric(
+                    prediction_scores=probs,
+                    references=refs,
+                    multi_class="ovr"
+                )
+            else:
+                _res = metric(
+                    predictions=preds,
+                    references=refs
+                )
+            if _res is not None:
+                results.update(_res)
+            else:
+                results[metric_name] = None
+        return results
 
     # TODO: Define custom loss calculation
-    def compute_loss_func(outputs, labels: Optional[torch.Tensor] = None, num_items_in_batch: Optional[torch.Tensor] = None) -> float:
-        return 0.0
+    if aux_args.focal_loss_alpha == -1.0:
+        if aux_args.focal_loss_task == "binary":
+            focal_loss_alpha = 0.25
+        else:
+            frequencies = Counter(dataset["train"][data_args.label_column_name])
+            focal_loss_alpha = [
+                1.0 / frequencies.get(l_id, 4)
+                for l_id, l in enumerate(labels)
+            ]
+    else:
+        focal_loss_alpha = aux_args.focal_loss_alpha
+    F_focal_loss = FocalLoss(
+        gamma=aux_args.focal_loss_gamma,
+        alpha=focal_loss_alpha,
+        task_type=aux_args.focal_loss_task
+    )
+    def compute_loss_func(model_outputs, labels, num_items_in_batch: Optional[torch.Tensor] = None):
+        logits = model_outputs["logits"]
+        loss = 0.0
+
+        ce_loss = F.cross_entropy(logits, labels)
+        loss += ce_loss * aux_args.ce_loss_multiplier
+
+        focal_loss = F_focal_loss(logits, labels)
+        loss += focal_loss * aux_args.focal_loss_multiplier
+
+        return loss
 
     config = AutoConfig.from_pretrained(
         model_args.config_name or model_args.model_name_or_path,
@@ -338,9 +433,9 @@ def main():
         _train_transforms = image_processor.train_transforms
         _val_transforms = image_processor.val_transforms
     elif isinstance(image_processor, ViTHybridImageProcessor):
-        def hybrid_vit_transform(images):
-            return image_processor(images=images, return_tensors="pt").get("pixel_values")[0]
-
+        hybrid_vit_transform = Lambda(
+            lambda im: image_processor(images=im, return_tensors="pt")["pixel_values"][0]
+        )
         _train_transforms = hybrid_vit_transform
         _val_transforms = hybrid_vit_transform
     else:
@@ -412,7 +507,7 @@ def main():
         train_dataset=dataset["train"] if training_args.do_train else None,
         eval_dataset=dataset["validation"] if training_args.do_eval else None,
         compute_metrics=compute_metrics,
-        # compute_loss_func=compute_loss_func,
+        compute_loss_func=compute_loss_func,
         processing_class=image_processor,
         data_collator=collate_fn,
     )

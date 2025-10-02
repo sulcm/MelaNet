@@ -8,7 +8,7 @@
             "name": "Finetune - Image Classification",
             "type": "debugpy",
             "request": "launch",
-            "cwd": "${workspaceFolder}/model/training/run_scripts",
+            "cwd": "${workspaceFolder}/melanet/training/image_classification",
             "program": "run_image_classification.py",
             "console": "integratedTerminal",
             "args": [
@@ -38,7 +38,11 @@
                 "--report_to", "wandb",
                 "--dataloader_num_workers", "4",
                 "--seed", "42"
-            ]
+            ],
+            "env": {
+                "WANDB_PROJECT": "MelaNet-debug"
+            },
+            "justMyCode": false
         }
     ]
 }
