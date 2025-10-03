@@ -8,7 +8,7 @@
             "name": "Finetune - Image Classification",
             "type": "debugpy",
             "request": "launch",
-            "cwd": "${workspaceFolder}/model/training/run_scripts",
+            "cwd": "${workspaceFolder}/melanet/training/image_classification",
             "program": "run_image_classification.py",
             "console": "integratedTerminal",
             "args": [
@@ -35,10 +35,20 @@
                 "--do_train",
                 "--do_eval",
                 "--fp16",
-                "--report_to", "wandb",
+                // "--report_to", "wandb",
+                "--report_to", "none",
                 "--dataloader_num_workers", "4",
-                "--seed", "42"
-            ]
+                "--seed", "42",
+                // "--loss_reduction", "mean",
+                // "--ce_loss_multiplier", "0.5",
+                // "--focal_loss_multiplier", "0.5",
+                // "--hidden_dropout", "0.5",
+                // "--attention_dropout", "0.5",
+            ],
+            "env": {
+                "WANDB_PROJECT": "MelaNet-debug"
+            },
+            "justMyCode": false
         }
     ]
 }

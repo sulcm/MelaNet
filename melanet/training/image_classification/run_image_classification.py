@@ -14,9 +14,12 @@ import transformers
 import torch
 import evaluate
 import numpy as np
+import torch.nn.functional as F
 
-from typing import Optional
+from typing import cast, Optional, Callable, Literal
 from dataclasses import dataclass, field
+from functools import partial
+from collections import Counter
 
 from PIL import Image
 from datasets import load_dataset, load_from_disk
@@ -37,15 +40,17 @@ from transformers import (
     AutoModelForImageClassification,
     HfArgumentParser,
     ViTHybridImageProcessor,
-    ViTHybridForImageClassification,
+    ViTHybridConfig,
     TimmWrapperImageProcessor,
     Trainer,
     TrainingArguments,
     set_seed,
 )
 from transformers.trainer_utils import get_last_checkpoint
-from transformers.utils import check_min_version, send_example_telemetry
-from transformers.utils.versions import require_version
+# from transformers.utils import check_min_version, send_example_telemetry
+# from transformers.utils.versions import require_version
+
+from loss_functions import FocalLoss, SupConLoss
 
 
 logger = logging.getLogger(__name__)
@@ -170,18 +175,111 @@ class ModelArguments:
     )
 
 
+@dataclass
+class AuxiliaryArguments:
+    """
+    Auxiliary arguments to specify/define for model/data/training
+    """
+
+    # Loss
+    loss_reduction: Literal["sum", "mean", "w_mean"] = field(
+        default="sum",
+        metadata={"help": (
+            "How to combine multiple losses from applied loss functions."
+            " - 'sum': Sums all results"
+            " - 'mean': Returns the mean of applied loss functions"
+            " - 'w_mean': Returns the weighted mean of applied loss functions (weight == loss multiplier)"
+            " Defaults to 'sum'."
+        )}
+    )
+    ## CE
+    ce_loss_multiplier: Optional[float] = field(
+        default=None,
+        metadata={"help": (
+            "Value that multiplies CE loss. If `None` then do not apply CE loss."
+            " If every other loss has multiplier set to `None` then default to `ce_loss_multiplier=1.0`"
+        )}
+    )
+    ## Focal
+    focal_loss_multiplier: Optional[float] = field(
+        default=None,
+        metadata={"help": "Value that multiplies Focal loss. If `None` then do not apply Focal loss."}
+    )
+    focal_loss_task: Literal["binary", "multiclass", "multilabel"] = field(
+        default="multiclass",
+        metadata={"help": "Fine-tuning task such as 'binary', 'multiclass', or 'multilabel'"}
+    )
+    focal_loss_gamma: float = field(
+        default=2.0,
+        metadata={"help": (
+            "Controls how much to down-weight easy examples."
+            " Defaults to `2.0`"
+            " as in original [paper](https://openaccess.thecvf.com/content_iccv_2017/html/Lin_Focal_Loss_for_ICCV_2017_paper.html)."
+        )}
+    )
+    focal_loss_alpha: Optional[float] = field(
+        default=None,
+        metadata={"help": (
+            "Balances positive vs. negative classes weights."
+            " Enter single weight using floating point number (usually `[0.25, 0.75]`)."
+            " If `-1` entered then weights are auto selected. For binary task is alpha set to `0.25` otherwise list of inverse frequencies of classes is used."
+            " Defaults to `None`."
+        )}
+    )
+    ## SupCon (Supervised Contrastive)
+    supcon_loss_multiplier: Optional[float] = field(
+        default=None,
+        metadata={"help": "Value that multiplies SupCon loss"}
+    )
+    supcon_loss_temperature: float = field(
+        default=0.07,
+        metadata={"help": "Controls how peaked the distribution of similarities is in contrastive learning. Defaults to `0.07` as recommended in paper."}
+    )
+    supcon_loss_base_temperature: Optional[float] = field(
+        default=None,
+        metadata={"help": (
+            "Normalization constant that balances scaling of the loss"
+            " `loss = - (temperature / base_temperature) * mean_log_prob_pos`."
+            " Defaults to `None` then is set to the same value as `temperature` parameter."
+        )}
+    )
+    supcon_loss_contrast_mode: Literal["all", "one"] = field(
+        default="all",
+        metadata={"help": (
+            "How to contrast anchor againts other positives samples."
+            " - 'all' more memory intensive -> usually better results;"
+            " - 'one' less memory usage;"
+            " Defaults to 'all'."
+        )}
+    )
+    # Models
+    ## Dropouts
+    dropout: Optional[float] = field(
+        default=None,
+        metadata={"help": "Global dropout option. Applied if found in model config. `None` means default (config) value."}
+    )
+    hidden_dropout: Optional[float] = field(
+        default=None,
+        metadata={"help": "Hidden layers dropout option. Applied if found in model config. `None` means default (config) value."}
+    )
+    attention_dropout: Optional[float] = field(
+        default=None,
+        metadata={"help": "Attention layer dropout option. Applied if found in model config. `None` means default (config) value."}
+    )
+
+
 def main():
     # See all possible arguments in src/transformers/training_args.py
     # or by passing the --help flag to this script.
     # We now keep distinct sets of args, for a cleaner separation of concerns.
-
-    parser = HfArgumentParser((ModelArguments, DataTrainingArguments, TrainingArguments))
+    parser = HfArgumentParser((ModelArguments, DataTrainingArguments, TrainingArguments, AuxiliaryArguments))
     if len(sys.argv) == 2 and sys.argv[1].endswith(".json"):
         # If we pass only one argument to the script and it's the path to a json file,
         # let's parse it to get our arguments.
-        model_args, data_args, training_args = parser.parse_json_file(json_file=os.path.abspath(sys.argv[1]))
+        parsed_args = parser.parse_json_file(json_file=os.path.abspath(sys.argv[1]))
     else:
-        model_args, data_args, training_args = parser.parse_args_into_dataclasses()
+        parsed_args = parser.parse_args_into_dataclasses()
+    model_args, data_args, training_args, aux_args = cast(tuple[ModelArguments, DataTrainingArguments, TrainingArguments, AuxiliaryArguments], parsed_args)
 
     # Sending telemetry. Tracking the example usage helps us better allocate resources to maintain them. The
     # information sent is the one passed as arguments along with your Python/PyTorch versions.
@@ -290,18 +388,97 @@ def main():
         id2label[str(i)] = label
 
     # TODO: Add metric comutation
-    # Load the accuracy metric from the datasets package
-    metric = evaluate.load("accuracy", cache_dir=model_args.cache_dir)
+    # Load selected metrics from the datasets package
+    metrics: dict[str, Callable] = {
+        "f1": partial(evaluate.load("f1", "multiclass").compute, average="weighted"),
+        "precision": partial(evaluate.load("precision", "multiclass").compute, average="weighted"),
+        "recall": partial(evaluate.load("recall", "multiclass").compute, average="weighted"),
+        "accuracy": evaluate.load("accuracy", "multiclass").compute,
+        "roc_auc": partial(evaluate.load("roc_auc", "multiclass").compute, average="weighted"),
+    }
 
     # Define our compute_metrics function. It takes an `EvalPrediction` object (a namedtuple with a
     # predictions and label_ids field) and has to return a dictionary string to float.
     def compute_metrics(p):
         """Computes accuracy on a batch of predictions"""
-        return metric.compute(predictions=np.argmax(p.predictions, axis=1), references=p.label_ids)
+        preds = np.argmax(p.predictions, axis=-1)
+        probs = F.softmax(torch.tensor(p.predictions), dim=-1).numpy()
+        refs = p.label_ids
+
+        results = {}
+        for metric_name, metric in metrics.items():
+            if metric_name == "roc_auc":
+                _res = metric(
+                    prediction_scores=probs,
+                    references=refs,
+                    multi_class="ovr"
+                )
+            else:
+                _res = metric(
+                    predictions=preds,
+                    references=refs
+                )
+            if _res is not None:
+                results.update(_res)
+            else:
+                results[metric_name] = None
+        return results
 
     # TODO: Define custom loss calculation
-    def compute_loss_func(outputs, labels: Optional[torch.Tensor] = None, num_items_in_batch: Optional[torch.Tensor] = None) -> float:
-        return 0.0
+    if (
+        aux_args.ce_loss_multiplier is None
+        and aux_args.focal_loss_multiplier is None
+        and aux_args.supcon_loss_multiplier is None
+    ):
+        logger.warning(
+            "Missing specified loss function. Falling back to CE loss with multiplier set to 1.0"
+        )
+        aux_args.ce_loss_multiplier = 1.0
+    if aux_args.focal_loss_alpha == -1.0:
+        if aux_args.focal_loss_task == "binary":
+            focal_loss_alpha = 0.25
+        else:
+            frequencies = Counter(dataset["train"][data_args.label_column_name])
+            focal_loss_alpha = [
+                1.0 / frequencies.get(l_id, 4)
+                for l_id, l in enumerate(labels)
+            ]
+    else:
+        focal_loss_alpha = aux_args.focal_loss_alpha
+    F_focal_loss = FocalLoss(
+        gamma=aux_args.focal_loss_gamma,
+        alpha=focal_loss_alpha,
+        task_type=aux_args.focal_loss_task
+    )
+    F_supcon_loss = SupConLoss(
+        temperature=aux_args.supcon_loss_temperature,
+        base_temperature=aux_args.supcon_loss_base_temperature if aux_args.supcon_loss_base_temperature is not None else aux_args.supcon_loss_temperature,
+        contrast_mode=aux_args.supcon_loss_contrast_mode
+    )
+    def compute_loss_func(model_outputs, labels, num_items_in_batch = None):
+        logits = model_outputs["logits"]
+        features = model_outputs.get("features", None) # Some model outputs are missing `features` tensor
+        loss = 0.0
+        loss_norm_denom = 0.0
+
+        if aux_args.ce_loss_multiplier is not None:
+            ce_loss = F.cross_entropy(logits, labels)
+            loss += ce_loss * aux_args.ce_loss_multiplier
+            loss_norm_denom += aux_args.ce_loss_multiplier if aux_args.loss_reduction == "w_mean" else 1.0
+
+        if aux_args.focal_loss_multiplier is not None:
+            focal_loss = F_focal_loss(logits, labels)
+            loss += focal_loss * aux_args.focal_loss_multiplier
+            loss_norm_denom += aux_args.focal_loss_multiplier if aux_args.loss_reduction == "w_mean" else 1.0
+
+        if aux_args.supcon_loss_multiplier is not None and features is not None:
+            supcon_loss = F_supcon_loss(features, labels)
+            loss += supcon_loss * aux_args.supcon_loss_multiplier
+            loss_norm_denom += aux_args.supcon_loss_multiplier if aux_args.loss_reduction == "w_mean" else 1.0
+
+        if aux_args.loss_reduction != "sum":
+            loss /= loss_norm_denom + 1e-12
+        return loss
 
     config = AutoConfig.from_pretrained(
         model_args.config_name or model_args.model_name_or_path,
@@ -314,6 +491,13 @@ def main():
         token=model_args.token,
         trust_remote_code=model_args.trust_remote_code,
     )
+    # TODO: Modify config params at runtime
+    if isinstance(config, ViTHybridConfig):
+        if aux_args.hidden_dropout is not None:
+            config.hidden_dropout_prob = aux_args.hidden_dropout
+        if aux_args.attention_dropout is not None:
+            config.attention_probs_dropout_prob = aux_args.attention_dropout
+
     model = AutoModelForImageClassification.from_pretrained(
         model_args.model_name_or_path,
         from_tf=bool(".ckpt" in model_args.model_name_or_path),
@@ -324,6 +508,7 @@ def main():
         trust_remote_code=model_args.trust_remote_code,
         ignore_mismatched_sizes=model_args.ignore_mismatched_sizes,
     )
+
     image_processor = AutoImageProcessor.from_pretrained(
         model_args.image_processor_name or model_args.model_name_or_path,
         cache_dir=model_args.cache_dir,
@@ -338,9 +523,9 @@ def main():
         _train_transforms = image_processor.train_transforms
         _val_transforms = image_processor.val_transforms
     elif isinstance(image_processor, ViTHybridImageProcessor):
-        def hybrid_vit_transform(images):
-            return image_processor(images=images, return_tensors="pt").get("pixel_values")[0]
-
+        hybrid_vit_transform = Lambda(
+            lambda im: image_processor(images=im, return_tensors="pt")["pixel_values"][0]
+        )
         _train_transforms = hybrid_vit_transform
         _val_transforms = hybrid_vit_transform
     else:
@@ -412,7 +597,7 @@ def main():
         train_dataset=dataset["train"] if training_args.do_train else None,
         eval_dataset=dataset["validation"] if training_args.do_eval else None,
         compute_metrics=compute_metrics,
-        # compute_loss_func=compute_loss_func,
+        compute_loss_func=compute_loss_func,
         processing_class=image_processor,
         data_collator=collate_fn,
     )
