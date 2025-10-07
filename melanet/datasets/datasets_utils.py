@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, Union
 
 from functools import partial
 from collections import defaultdict
@@ -10,11 +10,11 @@ from datasets.features import Value, ClassLabel, Image
 from datasets.combine import concatenate_datasets
 
 
-def dataset_class_encode_column(dataset: Dataset, column: str, custom_labels: Optional[list[str]] = None, include_nulls: bool = False) -> Dataset:
+def dataset_class_encode_column(dataset: Union[Dataset, DatasetDict], column: str, custom_labels: Optional[list[str]] = None, include_nulls: bool = False) -> Dataset:
     """Casts the given column as [`~datasets.features.ClassLabel`] and updates the table.
 
     Args:
-        dataset (`Dataset`):
+        dataset (`Dataset | DatasetDict`):
             `Dataset` object with `column` to be casted as `ClassLabel`
         column (`str`):
             The name of the column to cast (list all the column names with [`~datasets.Dataset.column_names`])
@@ -124,7 +124,7 @@ def dataset_class_encode_column(dataset: Dataset, column: str, custom_labels: Op
         return __dataset_class_encode_column(dataset=dataset, column=column, custom_labels=custom_labels, include_nulls=include_nulls)
 
 
-def validate_equal_datasets(left: Dataset, right: Dataset, columns: list[str], batch_size: int=256, num_proc: Optional[int]=2) -> tuple[bool, Optional[str]]:
+def validate_equal_datasets(left: Union[Dataset, DatasetDict], right: Union[Dataset, DatasetDict], columns: list[str], batch_size: int=256, num_proc: Optional[int]=2) -> tuple[bool, Optional[str]]:
     def __validate_equal_datasets(left: Dataset, right: Dataset, columns: list[str], batch_size: int=256, num_proc: Optional[int]=2) -> tuple[bool, Optional[str]]:
         columns_set = set(columns)
         if len(columns_set) != len(columns):
