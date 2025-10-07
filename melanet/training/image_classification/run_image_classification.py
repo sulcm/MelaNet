@@ -390,11 +390,11 @@ def main():
     # TODO: Add metric comutation
     # Load selected metrics from the datasets package
     metrics: dict[str, Callable] = {
-        "f1": partial(evaluate.load("f1", "multiclass").compute, average="weighted"),
-        "precision": partial(evaluate.load("precision", "multiclass").compute, average="weighted"),
-        "recall": partial(evaluate.load("recall", "multiclass").compute, average="weighted"),
+        "f1": partial(evaluate.load("f1", "multiclass").compute, average="macro"),
+        "precision": partial(evaluate.load("precision", "multiclass").compute, average="macro"),
+        "recall": partial(evaluate.load("recall", "multiclass").compute, average="macro"),
         "accuracy": evaluate.load("accuracy", "multiclass").compute,
-        "roc_auc": partial(evaluate.load("roc_auc", "multiclass").compute, average="weighted"),
+        "roc_auc": partial(evaluate.load("roc_auc", "multiclass").compute, average="macro"),
     }
 
     # Define our compute_metrics function. It takes an `EvalPrediction` object (a namedtuple with a
