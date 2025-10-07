@@ -6,3 +6,4 @@ torchvision
 evaluate
 scikit-learn
 wandb
+matplotlib
