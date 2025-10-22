@@ -92,10 +92,12 @@ def sample_dataset_and_display(
     image_column: str,
     n: int,
     class_label_column: Optional[str] = None,
-    seed: int = 42,
+    seed: Optional[int] = None,
     cols: Optional[int] = None,
     resize: Optional[tuple] = None,
-    show_titles: bool = True
+    show_titles: bool = True,
+    save_path: Optional[str] = None,
+    **save_kwargs
 ) -> None:
     """
     From dataset randomly sample `n` images and display them in a grid.
@@ -131,7 +133,7 @@ def sample_dataset_and_display(
 
     for i, item in enumerate(sampled):
         pil_img: Image = item[image_column]
-        label = item[class_label_column]
+        label = item[class_label_column] if class_label_column else None
         # raw = item[image_column]
         # pil_img = _to_pil(raw)
         if pil_img is None:
@@ -144,17 +146,20 @@ def sample_dataset_and_display(
                 pil_img = pil_img.thumbnail(resize, resample=Image.LANCZOS)
             axes[i].imshow(pil_img)
         if show_titles:
-            title = f"{indices[i]}"
             if label is not None:
                 if isinstance(sampled.features[class_label_column], ClassLabel):
                     label = sampled.features[class_label_column].int2str(label)
-                title += f" - {label}"
+                title = f"{label} (ID: {indices[i]})"
+            else:
+                title = f"{indices[i]}"
             axes[i].set_title(title, fontsize=9)
         axes[i].axis("off")
 
     # hide any leftover axes
     for j in range(n, rows * cols):
         axes[j].axis("off")
-
     plt.tight_layout()
+
+    if save_path:
+        plt.savefig(save_path, **save_kwargs)
     plt.show()
