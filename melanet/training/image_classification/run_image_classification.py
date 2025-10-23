@@ -51,6 +51,7 @@ from transformers.trainer_utils import get_last_checkpoint
 # from transformers.utils.versions import require_version
 
 from loss_functions import FocalLoss, SupConLoss
+from metacentrum_utils import load_dataset_from_scratch, DATASET_SCRATCH_PREFIX
 
 
 logger = logging.getLogger(__name__)
@@ -333,6 +334,10 @@ def main():
             dataset = load_from_disk(
                 dataset_path=data_args.dataset_name
             )
+        elif data_args.dataset_name.startswith(DATASET_SCRATCH_PREFIX):
+            dataset = load_dataset_from_scratch(
+                data_args.dataset_name
+            )
         else:
             dataset = load_dataset(
                 data_args.dataset_name,
@@ -394,7 +399,7 @@ def main():
         "precision": partial(evaluate.load("precision", "multiclass").compute, average="macro"),
         "recall": partial(evaluate.load("recall", "multiclass").compute, average="macro"),
         "accuracy": evaluate.load("accuracy", "multiclass").compute,
-        "roc_auc": partial(evaluate.load("roc_auc", "multiclass").compute, average="macro"),
+        "roc_auc": partial(evaluate.load("roc_auc", "multiclass").compute, average="macro", multi_class="ovr"),
     }
 
     # Define our compute_metrics function. It takes an `EvalPrediction` object (a namedtuple with a
@@ -411,7 +416,6 @@ def main():
                 _res = metric(
                     prediction_scores=probs,
                     references=refs,
-                    multi_class="ovr"
                 )
             else:
                 _res = metric(
