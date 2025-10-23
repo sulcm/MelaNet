@@ -16,7 +16,7 @@ import evaluate
 import numpy as np
 import torch.nn.functional as F
 
-from typing import cast, Optional, Callable, Literal
+from typing import cast, Optional, Callable, Literal, Any
 from dataclasses import dataclass, field
 from functools import partial
 from collections import Counter
@@ -41,17 +41,33 @@ from transformers import (
     HfArgumentParser,
     ViTHybridImageProcessor,
     ViTHybridConfig,
-    TimmWrapperImageProcessor,
     Trainer,
     TrainingArguments,
     set_seed,
 )
+
+from transformers.utils import is_timm_available
+import transformers.models.timm_wrapper.modeling_timm_wrapper as transformers_modeling_timm_wrapper
+from transformers.models.timm_wrapper.image_processing_timm_wrapper import TimmWrapperImageProcessor
+from transformers.models.timm_wrapper.configuration_timm_wrapper import TimmWrapperConfig
+if is_timm_available():
+    import timm
+else:
+    timm = None
+
 from transformers.trainer_utils import get_last_checkpoint
 # from transformers.utils import check_min_version, send_example_telemetry
 # from transformers.utils.versions import require_version
 
-from loss_functions import FocalLoss, SupConLoss
-from metacentrum_utils import load_dataset_from_scratch, DATASET_SCRATCH_PREFIX
+# TODO: Workaround when launching this script from different locations
+if __name__ == "__main__":
+    # Script is run directly
+    from loss_functions import FocalLoss, SupConLoss
+    from metacentrum_utils import load_dataset_from_scratch, DATASET_SCRATCH_PREFIX
+else:
+    # Script is being imported or used from different location
+    from .loss_functions import FocalLoss, SupConLoss
+    from .metacentrum_utils import load_dataset_from_scratch, DATASET_SCRATCH_PREFIX
 
 
 logger = logging.getLogger(__name__)
@@ -68,6 +84,32 @@ def pil_loader(path: str):
     with open(path, "rb") as f:
         im = Image.open(f)
         return im.convert("RGB")
+
+
+# TODO: Monkey patch - Fixes missing configuration of parameter `pretrained`. Default behavior `pretrained=False`
+def _create_timm_model_with_error_handling_override(config: "TimmWrapperConfig", **model_kwargs):
+    """
+    Creates a timm model and provides a clear error message if the model is not found,
+    suggesting a library update.
+    """
+    try:
+        pretrained = model_kwargs.pop("pretrained", False)
+        logger.info(f"Initializing timm model {config.architecture} with pretrained={pretrained} and model kwargs:\n{model_kwargs}")
+        model = timm.create_model(
+            config.architecture,
+            pretrained=pretrained,
+            **model_kwargs,
+        )
+        return model
+    except RuntimeError as e:
+        if "Unknown model" in str(e):
+            # A good general check for unknown models.
+            raise ImportError(
+                f"The model architecture '{config.architecture}' is not supported in your version of timm ({timm.__version__}). "
+                "Please upgrade timm to a more recent version with `pip install -U timm`."
+            ) from e
+        raise e
+transformers_modeling_timm_wrapper._create_timm_model_with_error_handling = _create_timm_model_with_error_handling_override
 
 
 @dataclass
@@ -269,12 +311,14 @@ class AuxiliaryArguments:
     )
 
 
-def main():
+def main(args: Optional[dict[str, Any]] = None):
     # See all possible arguments in src/transformers/training_args.py
     # or by passing the --help flag to this script.
     # We now keep distinct sets of args, for a cleaner separation of concerns.
     parser = HfArgumentParser((ModelArguments, DataTrainingArguments, TrainingArguments, AuxiliaryArguments))
-    if len(sys.argv) == 2 and sys.argv[1].endswith(".json"):
+    if args is not None:
+        parsed_args = parser.parse_dict(args=args)
+    elif len(sys.argv) == 2 and sys.argv[1].endswith(".json"):
         # If we pass only one argument to the script and it's the path to a json file,
         # let's parse it to get our arguments.
         parsed_args = parser.parse_json_file(json_file=os.path.abspath(sys.argv[1]))
@@ -462,6 +506,7 @@ def main():
     def compute_loss_func(model_outputs, labels, num_items_in_batch = None):
         logits = model_outputs["logits"]
         features = model_outputs.get("features", None) # Some model outputs are missing `features` tensor
+        eps = 1e-12
         loss = 0.0
         loss_norm_denom = 0.0
 
@@ -481,7 +526,7 @@ def main():
             loss_norm_denom += aux_args.supcon_loss_multiplier if aux_args.loss_reduction == "w_mean" else 1.0
 
         if aux_args.loss_reduction != "sum":
-            loss /= loss_norm_denom + 1e-12
+            loss /= loss_norm_denom + eps
         return loss
 
     config = AutoConfig.from_pretrained(
