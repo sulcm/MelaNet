@@ -1,10 +1,11 @@
 python run_image_classification.py \
-    --model_name_or_path /home/sulcm/models/melanet/google_hybrid_cnn_vit/base \
+    --model_name_or_path timm/resnet50.a1_in1k \
+    --ignore_mismatched_sizes True \
     --dataset_name /home/sulcm/datasets/milk10k/SpilledMILK10k \
     --image_column_name image \
     --label_column_name label \
     --remove_unused_columns False \
-    --output_dir /home/sulcm/models/melanet/google_hybrid_cnn_vit/melanet_test_01 \
+    --output_dir /home/sulcm/models/melanet/resnet50/melanet_resnet_test_01 \
     --overwrite_output_dir \
     --num_train_epochs 10 \
     --learning_rate 5e-5 \
