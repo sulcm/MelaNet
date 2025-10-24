@@ -431,19 +431,38 @@ def main(args: Optional[dict[str, Any]] = None):
     # Prepare label mappings.
     # We'll include these in the model's config to get human readable labels in the Inference API.
     labels = dataset["train"].features[data_args.label_column_name].names
+    labels_int = []
     label2id, id2label = {}, {}
     for i, label in enumerate(labels):
         label2id[label] = str(i)
         id2label[str(i)] = label
+        labels_int.append(i)
 
     # TODO: Add metric comutation
     # Load selected metrics from the datasets package
     metrics: dict[str, Callable] = {
-        "f1": partial(evaluate.load("f1", "multiclass").compute, average="macro"),
-        "precision": partial(evaluate.load("precision", "multiclass").compute, average="macro"),
-        "recall": partial(evaluate.load("recall", "multiclass").compute, average="macro"),
+        "f1": partial(
+            evaluate.load("f1", "multiclass").compute,
+            average="macro",
+            labels=labels_int
+        ),
+        "precision": partial(
+            evaluate.load("precision", "multiclass").compute,
+            average="macro",
+            labels=labels_int
+        ),
+        "recall": partial(
+            evaluate.load("recall", "multiclass").compute,
+            average="macro",
+            labels=labels_int
+        ),
         "accuracy": evaluate.load("accuracy", "multiclass").compute,
-        "roc_auc": partial(evaluate.load("roc_auc", "multiclass").compute, average="macro", multi_class="ovr"),
+        "roc_auc": partial(
+            evaluate.load("roc_auc", "multiclass").compute,
+            average="macro",
+            multi_class="ovo", # (ovr, ovo) - for higly imbalanced datasets set to "ovo" (in eval batch can be missing samples from some classes -> with "ovr" leads to `NaN`)
+            labels=labels_int
+        ),
     }
 
     # Define our compute_metrics function. It takes an `EvalPrediction` object (a namedtuple with a
