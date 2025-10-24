@@ -13,11 +13,13 @@
             "console": "integratedTerminal",
             "args": [
                 "--model_name_or_path", "/home/sulcm/models/melanet/google_hybrid_cnn_vit/base",
-                "--dataset_name", "/home/sulcm/datasets/milk10k/milk10k",
+                // "--model_name_or_path", "timm/resnet50.a1_in1k",
+                // "--ignore_mismatched_sizes", "True",
+                "--dataset_name", "/home/sulcm/datasets/milk10k/SpilledMILK10k",
                 "--image_column_name", "image",
                 "--label_column_name", "label",
                 "--remove_unused_columns", "False",
-                "--output_dir", "/home/sulcm/models/melanet/google_hybrid_cnn_vit/melanet_debug",
+                "--output_dir", "/home/sulcm/models/melanet/debug/melanet_debug",
                 "--overwrite_output_dir",
                 "--max_steps", "100",
                 "--learning_rate", "2e-5",
@@ -39,6 +41,7 @@
                 "--report_to", "none",
                 "--dataloader_num_workers", "4",
                 "--seed", "42",
+                "--max_eval_samples", "100",
                 // "--loss_reduction", "mean",
                 // "--ce_loss_multiplier", "0.5",
                 // "--focal_loss_multiplier", "0.5",
@@ -49,6 +52,21 @@
                 "WANDB_PROJECT": "MelaNet-debug"
             },
             "justMyCode": false
-        }
+        },
+        {
+            "name": "W&B - Sweep",
+            "type": "debugpy",
+            "request": "launch",
+            "cwd": "${workspaceFolder}/melanet/training",
+            "program": "run_sweep.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--sweep_config_path", "/home/sulcm/repos/MelaNet/melanet/training/image_classification/configs/resnet50/sweep_01.yaml",
+                "--wandb_project", "Sweep-Debug",
+                "--training_task", "image_classification",
+                "--runs_count", "1",
+            ],
+            "justMyCode": false
+        },
     ]
 }

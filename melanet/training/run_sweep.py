@@ -1,5 +1,6 @@
 import os
 import json
+import yaml
 import wandb
 import logging
 
@@ -13,6 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 SUPPORTED_TRAINING_TASKS = ("image_classification",)
+OUTPUT_DIR_ARG = "output_dir"
 
 @dataclass
 class SweepArguments:
@@ -85,9 +87,15 @@ if __name__ == "__main__":
 
     if sweep_args.sweep_id is None and sweep_args.sweep_config_path is not None:
         logger.info(f"\t> Creating new sweep with config {sweep_args.sweep_config_path}")
-        assert os.path.isfile(sweep_args.sweep_config_path) and sweep_args.sweep_config_path.endswith(".json"), "Provided path to sweep config is not valid or is not JSON file."
-        with open(sweep_args.sweep_config_path, "r") as f:
-            sweep_configuration = json.load(f)
+        assert os.path.isfile(sweep_args.sweep_config_path), "Provided path to sweep config is not valid"
+        if sweep_args.sweep_config_path.endswith(".json"):
+            with open(sweep_args.sweep_config_path, "r") as f:
+                sweep_configuration = json.load(f)
+        elif sweep_args.sweep_config_path.endswith(".yaml") or sweep_args.sweep_config_path.endswith(".yml"):
+            with open(sweep_args.sweep_config_path, "r") as f:
+                sweep_configuration = yaml.safe_load(f)
+        else:
+            raise ValueError("Sweep configuration must be JSON or YAML file")
 
         sweep_id = wandb.sweep(sweep=sweep_configuration, project=sweep_args.wandb_project)
         logger.info(f"\t> Sweep created with ID: {sweep_id}")
@@ -99,5 +107,23 @@ if __name__ == "__main__":
             f"Missing specified `sweep_config_path` XOR `sweep_id` in launch arguments."
         )
 
+    def run_builder():
+        run = wandb.init()
+
+        if OUTPUT_DIR_ARG in run.config:
+            # Modify output directory path so that as sweep continues models are not overwritten
+            run.config.update_locked(
+                {
+                    OUTPUT_DIR_ARG: f"{run.config[OUTPUT_DIR_ARG].rstrip(os.path.sep)}-{run.id}"
+                },
+                _allow_val_change=True
+            )
+
+        args = run.config.as_dict()
+        logger.debug(f"Launching run {run.id} with args:\n{args}")
+        return main(
+            args=args
+        )
+
     logger.info(f"Launching sweep {sweep_id} with {sweep_args.runs_count} run(s) ...")
-    wandb.agent(sweep_id=sweep_id, function=main, count=sweep_args.runs_count)
+    wandb.agent(sweep_id=sweep_id, function=run_builder, count=sweep_args.runs_count)
