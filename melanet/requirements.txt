@@ -4,6 +4,7 @@ accelerate>=1.11.0
 torch>=2.5.0
 timm
 torchvision
+torchmetrics
 evaluate
 scikit-learn
 wandb
