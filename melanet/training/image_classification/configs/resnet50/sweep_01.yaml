@@ -21,6 +21,8 @@ parameters:
   remove_unused_columns:
     value: False
   # Training:
+  classification_task:
+    value: "multiclass"
   output_dir:
     value: "/home/sulcm/models/melanet/resnet50/melanet_resnet_test_01"
   overwrite_output_dir:
@@ -47,13 +49,15 @@ parameters:
     value: 42
   # Hyperparameters:
   num_train_epochs:
-    value: 10
+    value: 20
   learning_rate:
-    values: [1e-5, 5e-5, 1e-4]
+    min: 1e-5
+    max: 1e-2
+    distribution: log_uniform_values
   lr_scheduler_type:
     value: "cosine"
-  warmup_steps:
-    value: 10000
+  warmup_ratio:
+    value: 0.05
   per_device_train_batch_size:
     values: [32, 64]
   gradient_accumulation_steps:

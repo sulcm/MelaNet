@@ -3,13 +3,14 @@ python run_image_classification.py \
     --dataset_name /home/sulcm/datasets/milk10k/SpilledMILK10k \
     --image_column_name image \
     --label_column_name label \
+    --classification_task multiclass \
     --remove_unused_columns False \
     --output_dir /home/sulcm/models/melanet/google_hybrid_cnn_vit/melanet_test_01 \
     --overwrite_output_dir \
     --num_train_epochs 10 \
     --learning_rate 5e-5 \
     --lr_scheduler_type cosine \
-    --warmup_steps 10000 \
+    --warmup_ratio 0.05 \
     --per_device_train_batch_size 16 \
     --per_device_eval_batch_size 8 \
     --gradient_accumulation_steps 1 \
