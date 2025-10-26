@@ -3,10 +3,12 @@ python run_image_classification.py \
     --dataset_name TBD \
     --image_column_name image \
     --label_column_name label \
+    --classification_task multiclass \
     --remove_unused_columns False \
     --output_dir TBD \
     --overwrite_output_dir \
     --max_steps 100 \
+    --warmup_ratio 0.05 \
     --learning_rate 2e-5 \
     --per_device_train_batch_size 8 \
     --per_device_eval_batch_size 8 \

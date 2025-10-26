@@ -1,8 +1,10 @@
-transformers>=4.40.2
-datasets>=4.1.1
-accelerate>=1.10.0
+transformers>=4.57.0
+datasets>=4.3.0
+accelerate>=1.11.0
 torch>=2.5.0
+timm
 torchvision
+torchmetrics
 evaluate
 scikit-learn
 wandb

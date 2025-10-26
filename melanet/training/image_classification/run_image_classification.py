@@ -10,13 +10,12 @@ Modified version of file located at: https://github.com/huggingface/transformers
 import os
 import sys
 import logging
-import transformers
 import torch
-import evaluate
-import numpy as np
+import transformers
+import torch.nn as nn
 import torch.nn.functional as F
 
-from typing import cast, Optional, Callable, Literal
+from typing import cast, Optional, Callable, Literal, Any
 from dataclasses import dataclass, field
 from functools import partial
 from collections import Counter
@@ -41,24 +40,52 @@ from transformers import (
     HfArgumentParser,
     ViTHybridImageProcessor,
     ViTHybridConfig,
-    TimmWrapperImageProcessor,
     Trainer,
     TrainingArguments,
     set_seed,
 )
-from transformers.trainer_utils import get_last_checkpoint
-# from transformers.utils import check_min_version, send_example_telemetry
-# from transformers.utils.versions import require_version
 
-from loss_functions import FocalLoss, SupConLoss
-from metacentrum_utils import load_dataset_from_scratch, DATASET_SCRATCH_PREFIX
+from transformers.utils import is_timm_available
+import transformers.models.timm_wrapper.modeling_timm_wrapper as transformers_modeling_timm_wrapper
+from transformers.models.timm_wrapper.image_processing_timm_wrapper import TimmWrapperImageProcessor
+from transformers.models.timm_wrapper.configuration_timm_wrapper import TimmWrapperConfig
+if is_timm_available():
+    import timm
+else:
+    timm = None
+
+from transformers.trainer_utils import get_last_checkpoint
+from transformers.utils import check_min_version
+from transformers.utils.versions import require_version
+
+from torchmetrics.functional import (
+    auroc,
+    average_precision,
+    accuracy,
+    specificity,
+    recall,
+    f1_score,
+    precision,
+    negative_predictive_value,
+)
+
+
+# TODO: Workaround when launching this script from different locations
+if __name__ == "__main__":
+    # Script is run directly
+    from loss_functions import FocalLoss, SupConLoss, SeesawLoss
+    from metacentrum_utils import load_dataset_from_scratch, DATASET_SCRATCH_PREFIX
+else:
+    # Script is being imported or used from different location
+    from .loss_functions import FocalLoss, SupConLoss, SeesawLoss
+    from .metacentrum_utils import load_dataset_from_scratch, DATASET_SCRATCH_PREFIX
 
 
 logger = logging.getLogger(__name__)
 
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
-# check_min_version("4.57.0.dev0")
-# require_version("datasets>=2.14.0", "To fix: pip install -r examples/pytorch/image-classification/requirements.txt")
+check_min_version("4.57.0")
+require_version("datasets>=4.3.0", "To fix: pip install -r melanet/requirements.txt")
 
 MODEL_CONFIG_CLASSES = list(MODEL_FOR_IMAGE_CLASSIFICATION_MAPPING.keys())
 MODEL_TYPES = tuple(conf.model_type for conf in MODEL_CONFIG_CLASSES)
@@ -68,6 +95,32 @@ def pil_loader(path: str):
     with open(path, "rb") as f:
         im = Image.open(f)
         return im.convert("RGB")
+
+
+# TODO: Monkey patch - Fixes missing configuration of parameter `pretrained`. Default behavior `pretrained=False`
+def _create_timm_model_with_error_handling_override(config: "TimmWrapperConfig", **model_kwargs):
+    """
+    Creates a timm model and provides a clear error message if the model is not found,
+    suggesting a library update.
+    """
+    try:
+        pretrained = model_kwargs.pop("pretrained", False)
+        logger.info(f"Initializing timm model {config.architecture} with pretrained={pretrained} and model kwargs:\n{model_kwargs}")
+        model = timm.create_model(
+            config.architecture,
+            pretrained=pretrained,
+            **model_kwargs,
+        )
+        return model
+    except RuntimeError as e:
+        if "Unknown model" in str(e):
+            # A good general check for unknown models.
+            raise ImportError(
+                f"The model architecture '{config.architecture}' is not supported in your version of timm ({timm.__version__}). "
+                "Please upgrade timm to a more recent version with `pip install -U timm`."
+            ) from e
+        raise e
+transformers_modeling_timm_wrapper._create_timm_model_with_error_handling = _create_timm_model_with_error_handling_override
 
 
 @dataclass
@@ -90,7 +143,7 @@ class DataTrainingArguments:
     train_dir: Optional[str] = field(default=None, metadata={"help": "A folder containing the training data."})
     validation_dir: Optional[str] = field(default=None, metadata={"help": "A folder containing the validation data."})
     train_val_split: Optional[float] = field(
-        default=0.15, metadata={"help": "Percent to split off of train for validation."}
+        default=0.1, metadata={"help": "Percent to split off of train for validation."}
     )
     max_train_samples: Optional[int] = field(
         default=None,
@@ -182,6 +235,10 @@ class AuxiliaryArguments:
     Auxiliary arguments to specify/define for model/data/training
     """
 
+    # Training
+    classification_task: Literal["binary", "multiclass", "multilabel"] = field(
+        metadata={"help": "Specify classification task / objective. Possible values are 'binary', 'multiclass', or 'multilabel'."}
+    )
     # Loss
     loss_reduction: Literal["sum", "mean", "w_mean"] = field(
         default="sum",
@@ -227,6 +284,19 @@ class AuxiliaryArguments:
             " Defaults to `None`."
         )}
     )
+    ## Seesaw
+    seesaw_loss_multiplier: Optional[float] = field(
+        default=None,
+        metadata={"help": "Value that multiplies Seesaw loss. If `None` then do not apply Seesaw loss."}
+    )
+    seesaw_p: float = field(
+        default=0.8,
+        metadata={"help": "Power for mitigation factor."}
+    )
+    seesaw_q: float = field(
+        default=2.0,
+        metadata={"help": "Power for compensation factor."}
+    )
     ## SupCon (Supervised Contrastive)
     supcon_loss_multiplier: Optional[float] = field(
         default=None,
@@ -269,22 +339,19 @@ class AuxiliaryArguments:
     )
 
 
-def main():
+def main(args: Optional[dict[str, Any]] = None):
     # See all possible arguments in src/transformers/training_args.py
-    # or by passing the --help flag to this script.
-    # We now keep distinct sets of args, for a cleaner separation of concerns.
+    # Or by passing the --help flag to this script
+    # Keep distinct sets of args, for a cleaner separation of concerns
     parser = HfArgumentParser((ModelArguments, DataTrainingArguments, TrainingArguments, AuxiliaryArguments))
-    if len(sys.argv) == 2 and sys.argv[1].endswith(".json"):
-        # If we pass only one argument to the script and it's the path to a json file,
-        # let's parse it to get our arguments.
+    if args is not None:
+        parsed_args = parser.parse_dict(args=args)
+    elif len(sys.argv) == 2 and sys.argv[1].endswith(".json"):
+        # If passed only one argument to the script then assume it's the path to a json file
         parsed_args = parser.parse_json_file(json_file=os.path.abspath(sys.argv[1]))
     else:
         parsed_args = parser.parse_args_into_dataclasses()
     model_args, data_args, training_args, aux_args = cast(tuple[ModelArguments, DataTrainingArguments, TrainingArguments, AuxiliaryArguments], parsed_args)
-
-    # Sending telemetry. Tracking the example usage helps us better allocate resources to maintain them. The
-    # information sent is the one passed as arguments along with your Python/PyTorch versions.
-    # send_example_telemetry("run_image_classification", model_args, data_args)
 
     # Setup logging
     logging.basicConfig(
@@ -294,7 +361,7 @@ def main():
     )
 
     if training_args.should_log:
-        # The default of training_args.log_level is passive, so we set log level at info here to have that default.
+        # The default of training_args.log_level is passive, set the log level at info here to have that as a default
         transformers.utils.logging.set_verbosity_info()
 
     log_level = training_args.get_process_log_level()
@@ -303,14 +370,14 @@ def main():
     transformers.utils.logging.enable_default_handler()
     transformers.utils.logging.enable_explicit_format()
 
-    # Log on each process the small summary:
+    # Process log summary:
     logger.warning(
         f"Process rank: {training_args.local_rank}, device: {training_args.device}, n_gpu: {training_args.n_gpu}, "
         + f"distributed training: {training_args.parallel_mode.value == 'distributed'}, 16-bits training: {training_args.fp16}"
     )
     logger.info(f"Training/evaluation parameters {training_args}")
 
-    # Detecting last checkpoint.
+    # Detecting last checkpoint
     last_checkpoint = None
     if os.path.isdir(training_args.output_dir) and training_args.do_train and not training_args.overwrite_output_dir:
         last_checkpoint = get_last_checkpoint(training_args.output_dir)
@@ -325,20 +392,23 @@ def main():
                 "the `--output_dir` or add `--overwrite_output_dir` to train from scratch."
             )
 
-    # Set seed before initializing model.
+    # Set seed (before initializing model in case there are no pretrained weights)
     set_seed(training_args.seed)
 
-    # Initialize our dataset and prepare it for the 'image-classification' task.
+    # Initialize dataset and prepare it for the 'image-classification' task
     if data_args.dataset_name is not None:
         if os.path.exists(data_args.dataset_name):
+            # Load from local path
             dataset = load_from_disk(
                 dataset_path=data_args.dataset_name
             )
         elif data_args.dataset_name.startswith(DATASET_SCRATCH_PREFIX):
+            # Load from scratch directory on Metacentrum
             dataset = load_dataset_from_scratch(
                 data_args.dataset_name
             )
         else:
+            # Pull from HF or load it from cache
             dataset = load_dataset(
                 data_args.dataset_name,
                 data_args.dataset_config_name,
@@ -347,6 +417,7 @@ def main():
                 trust_remote_code=model_args.trust_remote_code,
             )
     else:
+        # Load data from directory (must have correct structre as expected from `imagefolder`)
         data_files = {}
         if data_args.train_dir is not None:
             data_files["train"] = os.path.join(data_args.train_dir, "**")
@@ -358,6 +429,7 @@ def main():
             cache_dir=model_args.cache_dir,
         )
 
+    # Validate image and label columns
     dataset_column_names = dataset["train"].column_names if "train" in dataset else dataset["validation"].column_names
     if data_args.image_column_name not in dataset_column_names:
         raise ValueError(
@@ -372,118 +444,186 @@ def main():
             f"{', '.join(dataset_column_names)}."
         )
 
+    # Collect outputs from batched processing
     def collate_fn(examples):
         pixel_values = torch.stack([example["pixel_values"] for example in examples])
         labels = torch.tensor([example[data_args.label_column_name] for example in examples])
         return {"pixel_values": pixel_values, "labels": labels}
 
-    # If we don't have a validation split, split off a percentage of train as validation.
+    # If no validation split, split off a percentage of train as validation
     data_args.train_val_split = None if "validation" in dataset else data_args.train_val_split
     if isinstance(data_args.train_val_split, float) and data_args.train_val_split > 0.0:
         split = dataset["train"].train_test_split(data_args.train_val_split)
         dataset["train"] = split["train"]
         dataset["validation"] = split["test"]
 
-    # Prepare label mappings.
-    # We'll include these in the model's config to get human readable labels in the Inference API.
+    # Prepare label mappings
     labels = dataset["train"].features[data_args.label_column_name].names
+    labels_int = []
     label2id, id2label = {}, {}
     for i, label in enumerate(labels):
         label2id[label] = str(i)
         id2label[str(i)] = label
+        labels_int.append(i)
 
     # TODO: Add metric comutation
-    # Load selected metrics from the datasets package
+    # Define selected metrics
     metrics: dict[str, Callable] = {
-        "f1": partial(evaluate.load("f1", "multiclass").compute, average="macro"),
-        "precision": partial(evaluate.load("precision", "multiclass").compute, average="macro"),
-        "recall": partial(evaluate.load("recall", "multiclass").compute, average="macro"),
-        "accuracy": evaluate.load("accuracy", "multiclass").compute,
-        "roc_auc": partial(evaluate.load("roc_auc", "multiclass").compute, average="macro", multi_class="ovr"),
+        "roc_auc": partial(
+            auroc,
+            task=aux_args.classification_task,
+            num_classes=len(labels),
+            average="macro"
+        ),
+        "ap": partial(
+            average_precision,
+            task=aux_args.classification_task,
+            num_classes=len(labels),
+            average="macro"
+        ),
+        "accuracy": partial(
+            accuracy,
+            task=aux_args.classification_task,
+            num_classes=len(labels),
+            average="macro"
+        ),
+        "specificity": partial(
+            specificity,
+            task=aux_args.classification_task,
+            num_classes=len(labels),
+            average="macro"
+        ),
+        "sensitivity": partial( # or Sensitivity
+            recall,
+            task=aux_args.classification_task,
+            num_classes=len(labels),
+            average="macro"
+        ),
+        "f1": partial(
+            f1_score,
+            task=aux_args.classification_task,
+            num_classes=len(labels),
+            average="macro"
+        ),
+        "ppv": partial( # or PPV
+            precision,
+            task=aux_args.classification_task,
+            num_classes=len(labels),
+            average="macro"
+        ),
+        "npv": partial(
+            negative_predictive_value,
+            task=aux_args.classification_task,
+            num_classes=len(labels),
+            average="macro"
+        ),
     }
 
-    # Define our compute_metrics function. It takes an `EvalPrediction` object (a namedtuple with a
-    # predictions and label_ids field) and has to return a dictionary string to float.
+    # Definition of `compute_metrics` function
+    # Input expects `EvalPrediction` object (a namedtuple with a `predictions` and `label_ids` field)
+    # Output has to be a dictionary string to float
     def compute_metrics(p):
         """Computes accuracy on a batch of predictions"""
-        preds = np.argmax(p.predictions, axis=-1)
-        probs = F.softmax(torch.tensor(p.predictions), dim=-1).numpy()
-        refs = p.label_ids
+        logits = torch.tensor(p.predictions)
+        target = torch.tensor(p.label_ids)
+        # preds = torch.argmax(logits, dim=-1)
+        probs = F.softmax(logits, dim=-1)
 
-        results = {}
-        for metric_name, metric in metrics.items():
-            if metric_name == "roc_auc":
-                _res = metric(
-                    prediction_scores=probs,
-                    references=refs,
-                )
-            else:
-                _res = metric(
-                    predictions=preds,
-                    references=refs
-                )
-            if _res is not None:
-                results.update(_res)
-            else:
-                results[metric_name] = None
+        results = {
+            metric_name: metric(
+                preds=probs,
+                target=target
+            ).float()
+            for metric_name, metric in metrics.items()
+        }
         return results
 
     # TODO: Define custom loss calculation
+    losses: list[tuple[float, nn.Module]] = []
     if (
         aux_args.ce_loss_multiplier is None
         and aux_args.focal_loss_multiplier is None
         and aux_args.supcon_loss_multiplier is None
+        and aux_args.seesaw_loss_multiplier is None
     ):
         logger.warning(
             "Missing specified loss function. Falling back to CE loss with multiplier set to 1.0"
         )
         aux_args.ce_loss_multiplier = 1.0
-    if aux_args.focal_loss_alpha == -1.0:
-        if aux_args.focal_loss_task == "binary":
-            focal_loss_alpha = 0.25
+
+    if aux_args.ce_loss_multiplier is not None:
+        F_ce_loss = nn.CrossEntropyLoss()
+        losses.append((
+            aux_args.ce_loss_multiplier,
+            F_ce_loss
+        ))
+    if aux_args.focal_loss_multiplier is not None:
+        if aux_args.focal_loss_alpha == -1.0:
+            if aux_args.focal_loss_task == "binary":
+                focal_loss_alpha = 0.25
+            else:
+                frequencies = Counter(dataset["train"][data_args.label_column_name])
+                focal_loss_alpha = [
+                    1.0 / frequencies.get(l_id, 4)
+                    for l_id, l in enumerate(labels)
+                ]
         else:
-            frequencies = Counter(dataset["train"][data_args.label_column_name])
-            focal_loss_alpha = [
-                1.0 / frequencies.get(l_id, 4)
-                for l_id, l in enumerate(labels)
-            ]
-    else:
-        focal_loss_alpha = aux_args.focal_loss_alpha
-    F_focal_loss = FocalLoss(
-        gamma=aux_args.focal_loss_gamma,
-        alpha=focal_loss_alpha,
-        task_type=aux_args.focal_loss_task
-    )
-    F_supcon_loss = SupConLoss(
-        temperature=aux_args.supcon_loss_temperature,
-        base_temperature=aux_args.supcon_loss_base_temperature if aux_args.supcon_loss_base_temperature is not None else aux_args.supcon_loss_temperature,
-        contrast_mode=aux_args.supcon_loss_contrast_mode
-    )
+            focal_loss_alpha = aux_args.focal_loss_alpha
+        F_focal_loss = FocalLoss(
+            gamma=aux_args.focal_loss_gamma,
+            alpha=focal_loss_alpha,
+            task_type=aux_args.focal_loss_task
+        )
+        losses.append((
+            aux_args.focal_loss_multiplier,
+            F_focal_loss
+        ))
+    if aux_args.seesaw_loss_multiplier is not None:
+        F_seesaw_loss = SeesawLoss(
+            num_classes=len(labels),
+            p=aux_args.seesaw_p,
+            q=aux_args.seesaw_q,
+            device=training_args.device
+        )
+        losses.append((
+            aux_args.seesaw_loss_multiplier,
+            F_seesaw_loss
+        ))
+    if aux_args.supcon_loss_multiplier is not None:
+        F_supcon_loss = SupConLoss(
+            temperature=aux_args.supcon_loss_temperature,
+            base_temperature=aux_args.supcon_loss_base_temperature if aux_args.supcon_loss_base_temperature is not None else aux_args.supcon_loss_temperature,
+            contrast_mode=aux_args.supcon_loss_contrast_mode
+        )
+        losses.append((
+            aux_args.supcon_loss_multiplier,
+            F_supcon_loss
+        ))
+
+    # Create override method for `compute_loss_func`
+    # Input expects model_outputs (`dict` or `ImageClassifierOutput`), labels (`Tensor`), and num_items_in_batch (`Tensor`, optional)
+    # Output should be scalar loss (`float`)
     def compute_loss_func(model_outputs, labels, num_items_in_batch = None):
         logits = model_outputs["logits"]
         features = model_outputs.get("features", None) # Some model outputs are missing `features` tensor
+        eps = 1e-12
         loss = 0.0
         loss_norm_denom = 0.0
 
-        if aux_args.ce_loss_multiplier is not None:
-            ce_loss = F.cross_entropy(logits, labels)
-            loss += ce_loss * aux_args.ce_loss_multiplier
-            loss_norm_denom += aux_args.ce_loss_multiplier if aux_args.loss_reduction == "w_mean" else 1.0
-
-        if aux_args.focal_loss_multiplier is not None:
-            focal_loss = F_focal_loss(logits, labels)
-            loss += focal_loss * aux_args.focal_loss_multiplier
-            loss_norm_denom += aux_args.focal_loss_multiplier if aux_args.loss_reduction == "w_mean" else 1.0
-
-        if aux_args.supcon_loss_multiplier is not None and features is not None:
-            supcon_loss = F_supcon_loss(features, labels)
-            loss += supcon_loss * aux_args.supcon_loss_multiplier
-            loss_norm_denom += aux_args.supcon_loss_multiplier if aux_args.loss_reduction == "w_mean" else 1.0
+        for loss_multiplier, F_loss in losses:
+            if isinstance(F_loss, SupConLoss):
+                _loss = F_loss(features, labels)
+            else:
+                _loss = F_loss(logits, labels)
+            loss += _loss * loss_multiplier
+            loss_norm_denom += (loss_multiplier if aux_args.loss_reduction == "w_mean" else 1.0)
 
         if aux_args.loss_reduction != "sum":
-            loss /= loss_norm_denom + 1e-12
+            loss /= (loss_norm_denom + eps)
         return loss
 
+    # Load configuration, image processor, and model
+    # Optional cases where certain types of objects are modified at runtime
     config = AutoConfig.from_pretrained(
         model_args.config_name or model_args.model_name_or_path,
         num_labels=len(labels),
@@ -521,8 +661,8 @@ def main():
         trust_remote_code=model_args.trust_remote_code,
     )
 
-    # TODO: Make sure that images are not preprocessed multiple times (here and then in model image processor)
-    # Define torchvision transforms to be applied to each image.
+    # Define torchvision transforms to be applied to each image
+    # Usually apply transforms defined by image_processor or add data augmentation transforms
     if isinstance(image_processor, TimmWrapperImageProcessor):
         _train_transforms = image_processor.train_transforms
         _val_transforms = image_processor.val_transforms
@@ -574,6 +714,7 @@ def main():
         ]
         return example_batch
 
+    # Apply processing on dataset
     if training_args.do_train:
         if "train" not in dataset:
             raise ValueError("--do_train requires a train dataset")
@@ -594,14 +735,14 @@ def main():
         # Set the validation transforms
         dataset["validation"].set_transform(val_transforms)
 
-    # Initialize our trainer
+    # Initialize trainer
     trainer = Trainer(
         model=model,
         args=training_args,
         train_dataset=dataset["train"] if training_args.do_train else None,
         eval_dataset=dataset["validation"] if training_args.do_eval else None,
         compute_metrics=compute_metrics,
-        compute_loss_func=compute_loss_func,
+        compute_loss_func=compute_loss_func if len(losses) > 0 else None,
         processing_class=image_processor,
         data_collator=collate_fn,
     )
@@ -625,12 +766,12 @@ def main():
         trainer.log_metrics("eval", metrics)
         trainer.save_metrics("eval", metrics)
 
-    # Write model card and (optionally) push to hub
+    # Write model card and (optionally) push to HF hub
     kwargs = {
         "finetuned_from": model_args.model_name_or_path,
         "tasks": "image-classification",
         "dataset": data_args.dataset_name,
-        "tags": ["image-classification", "vision"],
+        "tags": ["image-classification", "vision", aux_args.classification_task],
     }
     if training_args.push_to_hub:
         trainer.push_to_hub(**kwargs)
