@@ -2,7 +2,7 @@ name: sweep-demo
 method: bayes
 metric:
   goal: minimize
-  name: eval_loss
+  name: eval/loss
 parameters:
   learning_rate:
     min: 0.0001

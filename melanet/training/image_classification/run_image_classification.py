@@ -399,16 +399,19 @@ def main(args: Optional[dict[str, Any]] = None):
     if data_args.dataset_name is not None:
         if os.path.exists(data_args.dataset_name):
             # Load from local path
+            logger.info(f"Loading dataset {data_args.dataset_name} from local path")
             dataset = load_from_disk(
                 dataset_path=data_args.dataset_name
             )
         elif data_args.dataset_name.startswith(DATASET_SCRATCH_PREFIX):
             # Load from scratch directory on Metacentrum
+            logger.info(f"Loading dataset {data_args.dataset_name} from scratch storage")
             dataset = load_dataset_from_scratch(
                 data_args.dataset_name
             )
         else:
             # Pull from HF or load it from cache
+            logger.info(f"Loading dataset {data_args.dataset_name} from HF Hub")
             dataset = load_dataset(
                 data_args.dataset_name,
                 data_args.dataset_config_name,
@@ -418,6 +421,7 @@ def main(args: Optional[dict[str, Any]] = None):
             )
     else:
         # Load data from directory (must have correct structre as expected from `imagefolder`)
+        logger.info(f"Loading data dir {data_args.dataset_name} from custom imagefolder")
         data_files = {}
         if data_args.train_dir is not None:
             data_files["train"] = os.path.join(data_args.train_dir, "**")
@@ -428,6 +432,7 @@ def main(args: Optional[dict[str, Any]] = None):
             data_files=data_files,
             cache_dir=model_args.cache_dir,
         )
+    logger.info(f"Loaded dataset: {dataset}")
 
     # Validate image and label columns
     dataset_column_names = dataset["train"].column_names if "train" in dataset else dataset["validation"].column_names

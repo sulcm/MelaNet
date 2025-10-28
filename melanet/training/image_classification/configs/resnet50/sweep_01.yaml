@@ -2,7 +2,7 @@ name: Sweep-ResNet50-CE
 method: bayes
 metric:
   goal: minimize
-  name: eval_loss
+  name: eval/loss
 parameters:
   # Model:
   model_name_or_path:
@@ -13,7 +13,7 @@ parameters:
     value: True
   # Dataset:
   dataset_name:
-    value: "/home/sulcm/datasets/milk10k/SpilledMILK10k"
+    value: "metacentrum_scratch/SpilledMILK10k"
   image_column_name:
     value: "image"
   label_column_name:
@@ -24,7 +24,7 @@ parameters:
   classification_task:
     value: "multiclass"
   output_dir:
-    value: "/home/sulcm/models/melanet/resnet50/melanet_resnet_test_01"
+    value: "/storage/plzen4-ntis/home/sulcm01/outputs/resnet50/melanet_resnet50_ce"
   overwrite_output_dir:
     value: True
   save_steps:
@@ -33,6 +33,10 @@ parameters:
     value: 2
   load_best_model_at_end:
     value: True
+  metric_for_best_model:
+    value: "eval_loss"
+  greater_is_better:
+    value: False
   logging_strategy:
     value: "steps"
   logging_steps:
@@ -49,7 +53,7 @@ parameters:
     value: 42
   # Hyperparameters:
   num_train_epochs:
-    value: 20
+    value: 30
   learning_rate:
     min: 1e-5
     max: 1e-2
