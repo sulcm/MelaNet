@@ -17,8 +17,12 @@ def copy_data_dir_to_scratch(dir_path: str) -> Optional[str]:
     assert METACENTRUM_SCRATCH_PATH, "This function can only be used on Metacentrum"
     try:
         data_dir_scratch = os.path.join(METACENTRUM_SCRATCH_PATH, os.path.basename(dir_path))
-        print(f"Copying data to local scratch: {data_dir_scratch}")
-        shutil.copytree(dir_path, data_dir_scratch)
+        if os.path.exists(data_dir_scratch):
+            print(f"Already exists on local scratch: {data_dir_scratch}")
+        else:
+            print(f"Copying data to local scratch: {data_dir_scratch}")
+            shutil.copytree(dir_path, data_dir_scratch)
+            print("Data were copied successfully to local scratch")
         return data_dir_scratch
     except Exception:
         print(f"ERROR:\n{traceback.format_exc()}")
@@ -34,6 +38,12 @@ def clear_scratch() -> bool:
     except Exception:
         print(f"ERROR:\n{traceback.format_exc()}")
         return False
+
+
+def ls_scratch(path: str = "") -> None:
+    assert METACENTRUM_SCRATCH_PATH, "This function can only be used on Metacentrum"
+    _ls_path = os.path.join(METACENTRUM_SCRATCH_PATH, path)
+    subprocess.run(["ls", "-lh", _ls_path], check=True)
 
 
 def load_dataset_from_scratch(dataset_name: str) -> Union[Dataset, DatasetDict, None]:

@@ -1,4 +1,4 @@
-name: Sweep-ResNet50-Seesaw
+name: Sweep-GoogleHybridViT-Seesaw
 method: bayes
 metric:
   goal: minimize
@@ -6,9 +6,7 @@ metric:
 parameters:
   # Model:
   model_name_or_path:
-    value: "timm/resnet50.a1_in1k"
-  ignore_mismatched_sizes:
-    value: True
+    value: "/storage/plzen4-ntis/home/sulcm01/outputs/google_hybrid_vit/base"
   fp16:
     value: True
   # Dataset:
@@ -24,7 +22,7 @@ parameters:
   classification_task:
     value: "multiclass"
   output_dir:
-    value: "/storage/plzen4-ntis/home/sulcm01/outputs/resnet50/melanet_resnet50_seesaw"
+    value: "/storage/plzen4-ntis/home/sulcm01/outputs/google_hybrid_vit/melanet_hvit_seesaw"
   overwrite_output_dir:
     value: True
   save_steps:
@@ -73,6 +71,6 @@ parameters:
   eval_strategy:
     value: "steps"
   eval_steps:
-    value: 1000
+    value: 500
   save_strategy:
     value: "steps"
