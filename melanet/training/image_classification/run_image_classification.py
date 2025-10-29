@@ -38,13 +38,18 @@ from transformers import (
     AutoImageProcessor,
     AutoModelForImageClassification,
     HfArgumentParser,
-    ViTHybridImageProcessor,
-    ViTHybridConfig,
     Trainer,
     TrainingArguments,
     set_seed,
 )
 
+from transformers.models import (
+    ViTHybridImageProcessor,
+    ViTHybridConfig,
+    BitConfig,
+)
+
+# TIMM
 from transformers.utils import is_timm_available
 import transformers.models.timm_wrapper.modeling_timm_wrapper as transformers_modeling_timm_wrapper
 from transformers.models.timm_wrapper.image_processing_timm_wrapper import TimmWrapperImageProcessor
@@ -336,6 +341,10 @@ class AuxiliaryArguments:
     attention_dropout: Optional[float] = field(
         default=None,
         metadata={"help": "Attention layer dropout option. Applied if found in model config. `None` means default (config) value."}
+    )
+    drop_path_rate: Optional[float] = field(
+        default=None,
+        metadata={"help": "Drop path with given rate. Applied if found in model config. `None` means default (config) value."}
     )
 
 
@@ -646,6 +655,9 @@ def main(args: Optional[dict[str, Any]] = None):
             config.hidden_dropout_prob = aux_args.hidden_dropout
         if aux_args.attention_dropout is not None:
             config.attention_probs_dropout_prob = aux_args.attention_dropout
+        if aux_args.drop_path_rate is not None:
+            if config.backbone_config and isinstance(config.backbone_config, BitConfig):
+                config.backbone_config.drop_path_rate = aux_args.drop_path_rate
 
     model = AutoModelForImageClassification.from_pretrained(
         model_args.model_name_or_path,
