@@ -70,13 +70,7 @@ class SweepArguments:
     )
 
 
-if __name__ == "__main__":
-    parser = HfArgumentParser(SweepArguments)
-    sweep_args = cast(
-        SweepArguments,
-        parser.parse_args_into_dataclasses()[0]
-    )
-
+def run_sweep(sweep_args: SweepArguments):
     logger.info(f"Initializing a hyperparameter search for task {sweep_args.training_task} ...")
     if sweep_args.training_task == "image_classification":
         from image_classification.run_image_classification import main
@@ -127,3 +121,13 @@ if __name__ == "__main__":
 
     logger.info(f"Launching sweep {sweep_id} with {sweep_args.runs_count} run(s) ...")
     wandb.agent(sweep_id=sweep_id, function=run_builder, count=sweep_args.runs_count)
+
+
+if __name__ == "__main__":
+    parser = HfArgumentParser(SweepArguments)
+    sweep_args = cast(
+        SweepArguments,
+        parser.parse_args_into_dataclasses()[0]
+    )
+
+    run_sweep(sweep_args=sweep_args)
