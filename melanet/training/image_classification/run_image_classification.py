@@ -439,13 +439,13 @@ def main(args: Optional[dict[str, Any]] = None):
     if data_args.image_column_name not in dataset_column_names:
         raise ValueError(
             f"--image_column_name {data_args.image_column_name} not found in dataset '{data_args.dataset_name}'. "
-            "Make sure to set `--image_column_name` to the correct audio column - one of "
+            "Make sure to set `--image_column_name` to the correct image column - one of "
             f"{', '.join(dataset_column_names)}."
         )
     if data_args.label_column_name not in dataset_column_names:
         raise ValueError(
             f"--label_column_name {data_args.label_column_name} not found in dataset '{data_args.dataset_name}'. "
-            "Make sure to set `--label_column_name` to the correct text column - one of "
+            "Make sure to set `--label_column_name` to the correct label column - one of "
             f"{', '.join(dataset_column_names)}."
         )
 
