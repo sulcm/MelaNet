@@ -69,7 +69,7 @@ parameters:
     max: 0.3
     distribution: log_uniform_values
   drop_path_rate:
-    min: 0.0
+    min: 1e-3
     max: 0.3
     distribution: log_uniform_values
   lr_scheduler_type:

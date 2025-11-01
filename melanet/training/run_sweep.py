@@ -27,6 +27,9 @@ class SweepArguments:
             "help": "Task name that specifies which training script is used."
         }
     )
+    wandb_project: str = field(
+        metadata={"help": "The name of the project where W&B runs created from the sweep are sent to."},
+    )
     sweep_id: Optional[str] = field(
         default=None,
         metadata={
@@ -45,15 +48,6 @@ class SweepArguments:
                 "Must be to JSON that is a dictionary that conforms to the W&B sweep config spec."
             )
         }
-    )
-    wandb_project: Optional[str] = field(
-        default=None,
-        metadata={
-            "help": (
-                "The name of the project where W&B runs created from the sweep are sent to. "
-                "If the project is not specified, the run is sent to a project labeled 'Uncategorized'."
-            )
-        },
     )
     runs_count: Optional[int] = field(
         default=None,
@@ -120,7 +114,12 @@ def run_sweep(sweep_args: SweepArguments):
         )
 
     logger.info(f"Launching sweep {sweep_id} with {sweep_args.runs_count} run(s) ...")
-    wandb.agent(sweep_id=sweep_id, function=run_builder, count=sweep_args.runs_count)
+    wandb.agent(
+        sweep_id=sweep_id,
+        function=run_builder,
+        project=sweep_args.wandb_project,
+        count=sweep_args.runs_count
+    )
 
 
 if __name__ == "__main__":
