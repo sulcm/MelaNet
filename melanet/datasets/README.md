@@ -35,3 +35,15 @@
     - Split dataset into __real__ train part and temporary validation/test part
     - Split the temporarily created part into __final__ validation and test parts
 - interactive notebook can be found [here](./merge_datasets.ipynb)
+
+---
+
+## Data Augmentation
+- applied due to high degree of imbalances in datasets
+- offline augmentations to balance each class (similar number of samples)
+    - up-sample under-represented classes to match class with the highest number of samples (most frequent class is not augmented)
+    - repeats N-1x or approx. fills reqiured number of samples to match most frequent class
+    - application of simple data augmentation transforms (e.g. horizontal flip, rotation, color jitter, and scale) on repeated samples
+    - merge original class samples with augmented variants
+- finally merge all up-sampled classes and shuffle final augmented and "balanced" dataset
+    - shuffling is required due to applied processing that groups classes together
