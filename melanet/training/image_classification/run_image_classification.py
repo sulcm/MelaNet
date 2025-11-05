@@ -10,18 +10,20 @@ Modified version of file located at: https://github.com/huggingface/transformers
 import os
 import sys
 import logging
+import random
 import torch
 import transformers
 import torch.nn as nn
 import torch.nn.functional as F
 
-from typing import cast, Optional, Callable, Literal, Any
+from typing import cast, Optional, Union, Callable, Literal, Any
 from dataclasses import dataclass, field
 from functools import partial
 from collections import Counter
 
 from PIL import Image
 from datasets import load_dataset, load_from_disk
+
 from torchvision.transforms import (
     CenterCrop,
     Compose,
@@ -32,6 +34,8 @@ from torchvision.transforms import (
     Resize,
     ToTensor,
 )
+from torchvision.transforms import v2 as torch_augmentation
+
 from transformers import (
     MODEL_FOR_IMAGE_CLASSIFICATION_MAPPING,
     AutoConfig,
@@ -41,6 +45,7 @@ from transformers import (
     Trainer,
     TrainingArguments,
     set_seed,
+    TrainerCallback
 )
 
 from transformers.models import (
@@ -80,10 +85,12 @@ if __name__ == "__main__":
     # Script is run directly
     from loss_functions import FocalLoss, SupConLoss, SeesawLoss
     from metacentrum_utils import load_dataset_from_scratch, DATASET_SCRATCH_PREFIX
+    from train_utils import TrainerPhaseDetectorCallback
 else:
     # Script is being imported or used from different location
     from .loss_functions import FocalLoss, SupConLoss, SeesawLoss
     from .metacentrum_utils import load_dataset_from_scratch, DATASET_SCRATCH_PREFIX
+    from .train_utils import TrainerPhaseDetectorCallback
 
 
 logger = logging.getLogger(__name__)
@@ -244,6 +251,20 @@ class AuxiliaryArguments:
     classification_task: Literal["binary", "multiclass", "multilabel"] = field(
         metadata={"help": "Specify classification task / objective. Possible values are 'binary', 'multiclass', or 'multilabel'."}
     )
+    apply_augmentations_prob: Optional[float] = field(
+        default=None,
+        metadata={"help": "Apply data augmentations on-the-fly using `torchvision.transforms` on samples in batch with given probability."}
+    )
+    apply_mixup_cutmix_prob: Optional[float] = field(
+        default=None,
+        metadata={
+            "help": (
+                "Apply randomly chosen MixUp or CutMix augmentation on-the-fly using `torchvision.transforms` on samples in batch with given probability."
+                " Be aware that those augmentations also modify the labels and returns soft labels e.i. [N,] -> [N, C]."
+                " Make sure that used loss functions support soft labels as targets."
+            )
+        }
+    )
     # Loss
     loss_reduction: Literal["sum", "mean", "w_mean"] = field(
         default="sum",
@@ -341,6 +362,10 @@ class AuxiliaryArguments:
     attention_dropout: Optional[float] = field(
         default=None,
         metadata={"help": "Attention layer dropout option. Applied if found in model config. `None` means default (config) value."}
+    )
+    final_dropout: Optional[float] = field(
+        default=None,
+        metadata={"help": "Final layer/classifier dropout option. Applied if found in model config. `None` means default (config) value."}
     )
     drop_path_rate: Optional[float] = field(
         default=None,
@@ -458,12 +483,6 @@ def main(args: Optional[dict[str, Any]] = None):
             f"{', '.join(dataset_column_names)}."
         )
 
-    # Collect outputs from batched processing
-    def collate_fn(examples):
-        pixel_values = torch.stack([example["pixel_values"] for example in examples])
-        labels = torch.tensor([example[data_args.label_column_name] for example in examples])
-        return {"pixel_values": pixel_values, "labels": labels}
-
     # If no validation split, split off a percentage of train as validation
     data_args.train_val_split = None if "validation" in dataset else data_args.train_val_split
     if isinstance(data_args.train_val_split, float) and data_args.train_val_split > 0.0:
@@ -480,7 +499,6 @@ def main(args: Optional[dict[str, Any]] = None):
         id2label[str(i)] = label
         labels_int.append(i)
 
-    # TODO: Add metric comutation
     # Define selected metrics
     metrics: dict[str, Callable] = {
         "roc_auc": partial(
@@ -552,7 +570,7 @@ def main(args: Optional[dict[str, Any]] = None):
         }
         return results
 
-    # TODO: Define custom loss calculation
+    # Custom loss calculation
     losses: list[tuple[float, nn.Module]] = []
     if (
         aux_args.ce_loss_multiplier is None
@@ -649,7 +667,7 @@ def main(args: Optional[dict[str, Any]] = None):
         token=model_args.token,
         trust_remote_code=model_args.trust_remote_code,
     )
-    # TODO: Modify config params at runtime
+    # Modify config params at runtime
     if isinstance(config, ViTHybridConfig):
         if aux_args.hidden_dropout is not None:
             config.hidden_dropout_prob = aux_args.hidden_dropout
@@ -658,6 +676,22 @@ def main(args: Optional[dict[str, Any]] = None):
         if aux_args.drop_path_rate is not None:
             if config.backbone_config and isinstance(config.backbone_config, BitConfig):
                 config.backbone_config.drop_path_rate = aux_args.drop_path_rate
+    elif isinstance(config, TimmWrapperConfig):
+        timm_model_args = {}
+
+        if "resnet" in config.architecture:
+            if aux_args.final_dropout:
+                timm_model_args["drop_rate"] = aux_args.final_dropout
+            if aux_args.drop_path_rate:
+                timm_model_args["drop_path_rate"] = aux_args.drop_path_rate
+            if aux_args.dropout:
+                timm_model_args["drop_block_rate"] = aux_args.dropout
+
+        if timm_model_args:
+            if config.model_args:
+                config.model_args.update(timm_model_args)
+            else:
+                config.model_args = timm_model_args
 
     model = AutoModelForImageClassification.from_pretrained(
         model_args.model_name_or_path,
@@ -752,6 +786,60 @@ def main(args: Optional[dict[str, Any]] = None):
         # Set the validation transforms
         dataset["validation"].set_transform(val_transforms)
 
+    # Augmentation transforms on data collected from `ImageProcessor`s
+    apply_augmentations_prob = aux_args.apply_augmentations_prob if aux_args.apply_augmentations_prob is not None and aux_args.apply_augmentations_prob > 0.0 else 0.0
+    apply_mixup_cutmix_prob = aux_args.apply_mixup_cutmix_prob if aux_args.apply_mixup_cutmix_prob is not None and aux_args.apply_mixup_cutmix_prob > 0.0 else 0.0
+    # In augmentation transforms do not change size, augmentations are applied after models `ImageProcessor` and would end up with unexpected input shape (raises errors)
+    rand_augment = torch_augmentation.RandAugment(
+        num_ops=2,
+        magnitude=9
+    )
+    mixup_or_cutmix = torch_augmentation.RandomChoice([
+        torch_augmentation.MixUp(
+            alpha=0.4,
+            num_classes=len(labels)
+        ),
+        torch_augmentation.CutMix(
+            alpha=1.0,
+            num_classes=len(labels)
+        )
+    ])
+
+    def apply_augmentation_transforms(images, labels):
+        if apply_augmentations_prob > 0.0:
+            # Workaround for torchvision.transforms applying same RNG state for whole batch -> iterate thru batch
+            images = torch.stack([
+                rand_augment(image)
+                if random.random() <= apply_augmentations_prob else
+                image
+                for image in images
+            ])
+
+        if random.random() <= apply_mixup_cutmix_prob:
+            images, labels = mixup_or_cutmix(images, labels)
+
+        return images, labels
+
+    # Collect outputs from batched processing
+    class PhaseDataCollator:
+        def __init__(self, augment_phase: Union[str, list[str]] = "train", phase_callback: Optional[TrainerPhaseDetectorCallback] = None):
+            self.phase_callback = phase_callback.get_trainer_phase if phase_callback is not None else lambda: None
+            self.augment_phase = set([augment_phase,] if isinstance(augment_phase, str) else augment_phase)
+
+        def __call__(self, samples):
+            pixel_values = torch.stack([sample["pixel_values"] for sample in samples])
+            labels = torch.tensor([sample[data_args.label_column_name] for sample in samples])
+
+            phase = self.phase_callback()
+            if phase in self.augment_phase:
+                if apply_augmentations_prob > 0.0 or apply_mixup_cutmix_prob > 0.0:
+                    pixel_values, labels = apply_augmentation_transforms(pixel_values, labels)
+
+            return {"pixel_values": pixel_values, "labels": labels}
+
+    phase_callback = TrainerPhaseDetectorCallback()
+    data_collator = PhaseDataCollator(phase_callback=phase_callback)
+
     # Initialize trainer
     trainer = Trainer(
         model=model,
@@ -761,7 +849,8 @@ def main(args: Optional[dict[str, Any]] = None):
         compute_metrics=compute_metrics,
         compute_loss_func=compute_loss_func if len(losses) > 0 else None,
         processing_class=image_processor,
-        data_collator=collate_fn,
+        data_collator=data_collator,
+        callbacks=[phase_callback],
     )
 
     # Training

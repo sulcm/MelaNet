@@ -20,6 +20,7 @@ class FocalLoss(nn.Module):
             eps (float, optional): Epsilon for numerical stability. Defaults to `1e-12`.
         """
         super(FocalLoss, self).__init__()
+
         self.gamma = gamma
         self.alpha = alpha
         self.reduction = reduction
@@ -33,19 +34,20 @@ class FocalLoss(nn.Module):
             else:
                 self.alpha = alpha
 
-    def forward(self, inputs, targets) -> torch.Tensor:
+    def forward(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
         """Forward pass to compute the Focal Loss based on the specified task type.
 
         Args:
             inputs (Tensor): Predictions (logits) from the model.
                 Shape:
-                    - binary/multilabel: (batch_size, num_classes)
+                    - binary: (batch_size, num_classes)
                     - multiclass: (batch_size, num_classes)
+                    - multilabel: (batch_size, num_classes)
             targets (Tensor): Ground truth labels.
                 Shape:
                     - binary: (batch_size,)
+                    - multiclass: (batch_size,)/(batch_size, num_classes)
                     - multilabel: (batch_size, num_classes)
-                    - multiclass: (batch_size,)
 
         Raises:
             ValueError: Invalid task_type
@@ -99,7 +101,11 @@ class FocalLoss(nn.Module):
         # Convert logits to probabilities with softmax
         probs = F.softmax(inputs, dim=-1)
         # One-hot encode the targets
-        targets_one_hot = F.one_hot(targets, num_classes=inputs.size(-1)).float()
+        if targets.dim() == 2 and targets.size(1) == inputs.size(-1):
+            # Use soft-label variant (for example used when applying MixUp/CutMix augmentations)
+            targets_one_hot = targets.float()
+        else:
+            targets_one_hot = F.one_hot(targets, num_classes=inputs.size(-1)).float()
 
         # Compute cross-entropy for each class
         ce_loss = -targets_one_hot * torch.log(probs + self.eps)

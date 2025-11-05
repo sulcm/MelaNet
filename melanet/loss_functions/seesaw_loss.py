@@ -27,7 +27,7 @@ class SeesawLoss(nn.Module):
         label_weights: Optional[list[float]] = None,
         reduction: str = "mean",
         device: Union[torch.device, str, None] = None
-    ) -> None:
+    ):
         """Initialize Seesaw Loss
 
         Args:
@@ -69,14 +69,20 @@ class SeesawLoss(nn.Module):
     @torch.no_grad()
     def update_class_counts(self, targets: torch.Tensor):
         """Accumulate class counts globally across training."""
-        unique, counts = torch.unique(targets, return_counts=True)
-        self.cum_samples[unique.to(self.cum_samples.device)] += counts.to(self.cum_samples.device).float()
+        if targets.ndim == 1:
+            unique, counts = torch.unique(targets, return_counts=True)
+            self.cum_samples[unique.to(self.cum_samples.device)] += counts.to(self.cum_samples.device).float()
+        elif targets.ndim == 2:
+            # Soft labels - accumulate fractional counts
+            self.cum_samples += targets.sum(dim=0).to(self.cum_samples.device).float()
+        else:
+            raise ValueError("Targets must be 1D or 2D tensor.")
 
     def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
         """
         Args:
             logits (Tensor): [N, C] raw model outputs.
-            targets (Tensor): [N] ground truth labels.
+            targets (Tensor): [N] ground truth labels or [N, C] with soft-labels.
 
         Returns:
             Tensor: Scalar loss.
@@ -86,9 +92,17 @@ class SeesawLoss(nn.Module):
 
         device = logits.device
         N, C = logits.size()
-        seesaw_weights = logits.new_ones(logits.size()) # [N, C]
+        seesaw_weights = torch.ones_like(logits) # [N, C]
 
-        # Update cumulative sample counts
+        # --- Detect target type ---
+        if targets.dim() == 2:
+            assert targets.size(1) == C, "soft targets must have shape [N, num_classes]"
+            # Some operations need hard indices so index of dominant class is used
+            hard_indices = torch.argmax(targets, dim=1)
+        else:
+            hard_indices = targets.long()
+
+        # --- Update cumulative sample counts ---
         self.update_class_counts(targets)
 
         # --- 1. Compute mitigation factor ---
@@ -104,14 +118,14 @@ class SeesawLoss(nn.Module):
                 # Always apply mitigation smoothly
                 sample_weights = torch.pow(torch.clamp(ratio_matrix, max=1.0), self.p)
 
-            mitigation_factor = sample_weights[targets.long(), :]  # [N, C]
+            mitigation_factor = sample_weights[hard_indices, :]  # [N, C]
             seesaw_weights *= mitigation_factor
 
         # --- 2. Compute compensation factor ---
         if self.q > 0:
             probs = F.softmax(logits.detach(), dim=1)
-            self_scores = probs[torch.arange(N, device=device), targets.long()]  # [N]
-            score_matrix = probs / self_scores[:, None].clamp(min=self.eps)
+            self_scores = probs[torch.arange(N, device=device), hard_indices].clamp(min=self.eps)  # [N]
+            score_matrix = probs / self_scores[:, None]
 
             if self.mask_mode:
                 # Only apply compensation when prob_j > prob_i
@@ -125,7 +139,7 @@ class SeesawLoss(nn.Module):
         # --- 3. Adjust logits ---
         if self.keep_target_logits:
             # Only adjust non-target class logits
-            one_hot = F.one_hot(targets, num_classes=C).float()
+            one_hot = F.one_hot(hard_indices, num_classes=C).float()
             adjusted_logits = logits + (seesaw_weights.log() * (1.0 - one_hot))
         else:
             adjusted_logits = logits + seesaw_weights.log()
