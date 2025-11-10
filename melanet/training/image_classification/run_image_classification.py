@@ -685,12 +685,25 @@ def main(args: Optional[dict[str, Any]] = None):
                 timm_model_args["drop_path_rate"] = aux_args.drop_path_rate
             if aux_args.dropout:
                 timm_model_args["drop_block_rate"] = aux_args.dropout
+        elif "caformer" in config.architecture:
+            if aux_args.final_dropout:
+                timm_model_args["drop_rate"] = aux_args.final_dropout
+            if aux_args.drop_path_rate:
+                timm_model_args["drop_path_rate"] = aux_args.drop_path_rate
+            if aux_args.hidden_dropout:
+                timm_model_args["proj_drop_rate"] = aux_args.hidden_dropout
+            if aux_args.attention_dropout:
+                timm_model_args["attn_drop"] = aux_args.attention_dropout
+        else:
+            pass
 
         if timm_model_args:
             if config.model_args:
                 config.model_args.update(timm_model_args)
             else:
                 config.model_args = timm_model_args
+    else:
+        pass
 
     model = AutoModelForImageClassification.from_pretrained(
         model_args.model_name_or_path,
@@ -854,6 +867,8 @@ def main(args: Optional[dict[str, Any]] = None):
 
     # Training
     if training_args.do_train:
+        phase_callback._set_trainer_phase("train")
+
         checkpoint = None
         if training_args.resume_from_checkpoint is not None:
             checkpoint = training_args.resume_from_checkpoint
@@ -867,6 +882,8 @@ def main(args: Optional[dict[str, Any]] = None):
 
     # Evaluation
     if training_args.do_eval:
+        phase_callback._set_trainer_phase("eval")
+
         metrics = trainer.evaluate()
         trainer.log_metrics("eval", metrics)
         trainer.save_metrics("eval", metrics)
