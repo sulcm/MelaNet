@@ -45,7 +45,6 @@ from transformers import (
     Trainer,
     TrainingArguments,
     set_seed,
-    TrainerCallback
 )
 
 from transformers.models import (
