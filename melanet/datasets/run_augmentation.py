@@ -8,7 +8,7 @@ from collections import Counter
 
 from tqdm import tqdm
 
-from transformers import HfArgumentParser
+from transformers import set_seed, HfArgumentParser
 from datasets import load_from_disk, load_dataset, Dataset, DatasetDict
 from datasets.combine import concatenate_datasets
 
@@ -167,6 +167,10 @@ def augment_dataset(augment_args: DataAugmentationArguments):
         augment_splits = augment_args.augment_splits.split("+")
     else:
         augment_splits = []
+
+    # Set seed (before running augmentations)
+    if augment_args.seed is not None:
+        set_seed(augment_args.seed)
 
     if isinstance(dataset, Dataset):
         if augment_args.image_column_name not in dataset.column_names:
