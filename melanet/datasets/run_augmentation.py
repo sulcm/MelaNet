@@ -32,7 +32,7 @@ class DataAugmentationArguments:
     augmented_dataset_path: str = field(
         metadata={"help": "Path where to save augmented dataset."}
     )
-    dataset_split: Optional[str] = field(
+    augment_splits: Optional[str] = field(
         default=None,
         metadata={
             "help": "If `None` then assume its single dataset of type `Dataset` otherwise provide name of the split or splits (e.g. 'train', 'train+validation', etc.)."
@@ -163,36 +163,53 @@ def augment_dataset(augment_args: DataAugmentationArguments):
     _ = dataset.cleanup_cache_files()
 
     if not isinstance(dataset, Dataset):
-        assert augment_args.dataset_split is not None, "When using dataset with multiple splits provide split name(s)"
-        augment_splits = augment_args.dataset_split.split("+")
+        assert augment_args.augment_splits is not None, "When using dataset with multiple splits provide split name(s)"
+        augment_splits = augment_args.augment_splits.split("+")
     else:
         augment_splits = []
 
-    if augment_args.image_column_name not in dataset.column_names:
-        raise ValueError(
-            f"--image_column_name {augment_args.image_column_name} not found in dataset '{augment_args.dataset_name}'. "
-            "Make sure to set `--image_column_name` to the correct image column - one of "
-            f"{', '.join(dataset.column_names)}."
-        )
-    if augment_args.label_column_name not in dataset.column_names:
-        raise ValueError(
-            f"--label_column_name {augment_args.label_column_name} not found in dataset '{augment_args.dataset_name}'. "
-            "Make sure to set `--label_column_name` to the correct text column - one of "
-            f"{', '.join(dataset.column_names)} - or remove it and skip metrics computations (no ground truth)."
-        )
-
     if isinstance(dataset, Dataset):
+        if augment_args.image_column_name not in dataset.column_names:
+            raise ValueError(
+                f"--image_column_name {augment_args.image_column_name} not found in dataset '{augment_args.dataset_name}'. "
+                "Make sure to set `--image_column_name` to the correct image column - one of "
+                f"{', '.join(dataset.column_names)}."
+            )
+        if augment_args.label_column_name not in dataset.column_names:
+            raise ValueError(
+                f"--label_column_name {augment_args.label_column_name} not found in dataset '{augment_args.dataset_name}'. "
+                "Make sure to set `--label_column_name` to the correct text column - one of "
+                f"{', '.join(dataset.column_names)} - or remove it and skip metrics computations (no ground truth)."
+            )
+
         augmented_dataset = _augment_split(
             augment_args=augment_args,
             dataset=dataset
         )
     else:
+        for dset_split in augment_splits:
+            assert dset_split in dataset, f"Split {dset_split} was not found in dataset, must be some of {dataset.keys()}"
+            if augment_args.image_column_name not in dataset[dset_split].column_names:
+                raise ValueError(
+                    f"--image_column_name {augment_args.image_column_name} not found in dataset '{augment_args.dataset_name}'. "
+                    "Make sure to set `--image_column_name` to the correct image column - one of "
+                    f"{', '.join(dataset[dset_split].column_names)}."
+                )
+            if augment_args.label_column_name not in dataset[dset_split].column_names:
+                raise ValueError(
+                    f"--label_column_name {augment_args.label_column_name} not found in dataset '{augment_args.dataset_name}'. "
+                    "Make sure to set `--label_column_name` to the correct text column - one of "
+                    f"{', '.join(dataset[dset_split].column_names)} - or remove it and skip metrics computations (no ground truth)."
+                )
+
         augmented_dataset = DatasetDict({
             split: _augment_split(
                 augment_args=augment_args,
                 dataset=dataset[split],
                 split_name=split
-            ) if split in augment_splits else dataset[split]
+            )
+            if split in augment_splits else
+            dataset[split]
             for split in dataset.keys()
         })
 
