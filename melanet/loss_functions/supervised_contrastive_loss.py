@@ -9,13 +9,14 @@ class SupConLoss(nn.Module):
 
     Args:
         temperature (float): scaling factor for similarity scores
-        contrast_mode (str): 'all' or 'one'. Defaults to 'all'.
+        contrast_mode (str): 'all' or 'one'. Defaults to 'all'
             - 'all' -> contrast against all positives
-            - 'one' -> contrast only against one positive (NT-Xent style)
+            - 'one' -> contrast only against one positive
         base_temperature (float): scaling for loss normalization
     """
     def __init__(self, temperature: float=0.07, contrast_mode="all", base_temperature: float=0.07, eps: float=1e-12):
         super(SupConLoss, self).__init__()
+
         self.temperature = temperature
         self.contrast_mode = contrast_mode
         self.base_temperature = base_temperature
@@ -25,32 +26,40 @@ class SupConLoss(nn.Module):
         """
         Args:
             features: hidden vector of shape [batch_size, n_views, dim]
-            labels: ground truth labels of shape [batch_size]
-            mask: contrastive mask of shape [batch_size, batch_size], mask[i][j] = 1 if sample j has the same class as sample i.
-                  Can be used instead of labels.
+            labels: ground truth labels of shape [batch_size] or soft labels of shape [batch_size, num_classes]
+            mask: optional contrastive mask of shape [batch_size, batch_size] (can be used instead of labels)
+                    mask[i][j] = 1 if sample j has the same class as sample i
+
         Returns:
             loss value (scalar)
         """
         device = features.device
-
         if len(features.shape) < 3:
             raise ValueError(f"`features` needs to be [batch_size, n_views, ...], got {features.shape}")
         batch_size, n_views, feature_dim = features.shape
 
         # Apply L2 normalization (Contrastive losses rely on similarity scores)
         features = F.normalize(features, p=2, dim=2)
-        # Flatten features: [batch_size * n_views, dim]
-        contrast_feature = torch.cat(torch.unbind(features, dim=1), dim=0)
+        contrast_feature = torch.cat(torch.unbind(features, dim=1), dim=0)  # Flatten features: [batch_size * n_views, dim]
 
+        # Handle mask and labels
         if labels is not None and mask is not None:
             raise ValueError("Cannot define both `labels` and `mask`.")
         elif labels is None and mask is None:
             mask = torch.eye(batch_size, dtype=torch.float32).to(device)
         elif labels is not None:
-            labels = labels.contiguous().view(-1, 1)  # [batch_size, 1]
-            if labels.shape[0] != batch_size:
-                raise ValueError("Labels shape mismatch with features.")
-            mask = torch.eq(labels, labels.T).float().to(device)
+            if labels.dim() == 1:
+                # Hard labels [batch_size,]
+                labels = labels.contiguous().view(-1, 1)  # [batch_size, 1]
+                if labels.shape[0] != batch_size:
+                    raise ValueError("Labels shape mismatch with features.")
+                mask = torch.eq(labels, labels.T).float().to(device) # binary mask
+            elif labels.dim() == 2:
+                # Soft labels [batch_size, num_classes]
+                # Expected positives: outer product of label distributions
+                mask = torch.matmul(labels, labels.T).to(device)  # [batch_size, batch_size]
+            else:
+                raise ValueError("Labels must be 1D (hard) or 2D (soft)")
         else:
             mask = mask.float().to(device)
 
@@ -88,5 +97,4 @@ class SupConLoss(nn.Module):
         # Loss
         loss = - (self.temperature / self.base_temperature) * mean_log_prob_pos
         loss = loss.view(batch_size, n_views).mean()
-
         return loss
