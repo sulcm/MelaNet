@@ -70,7 +70,7 @@ parameters:
   seesaw_loss_multiplier:
     value: 1.0
   per_device_train_batch_size:
-    values: [32, 64, 128]
+    values: [32, 64]
   gradient_accumulation_steps:
     value: 1
   per_device_eval_batch_size:
