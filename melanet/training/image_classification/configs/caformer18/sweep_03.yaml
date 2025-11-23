@@ -92,7 +92,7 @@ parameters:
   warmup_ratio:
     value: 0.05
   per_device_train_batch_size:
-    values: [32, 64, 128]
+    values: [32, 64]
   gradient_accumulation_steps:
     value: 1
   per_device_eval_batch_size:
