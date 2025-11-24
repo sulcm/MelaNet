@@ -890,7 +890,9 @@ def main(args: Optional[dict[str, Any]] = None):
 
     # Training
     if training_args.do_train:
-        phase_callback._set_trainer_phase("train")
+        phase_callback._set_trainer_phase(
+            TrainerPhaseDetectorCallback.TRAIN_PHASE
+        )
 
         checkpoint = None
         if training_args.resume_from_checkpoint is not None:
@@ -905,7 +907,9 @@ def main(args: Optional[dict[str, Any]] = None):
 
     # Evaluation
     if training_args.do_eval:
-        phase_callback._set_trainer_phase("eval")
+        phase_callback._set_trainer_phase(
+            TrainerPhaseDetectorCallback.EVAL_PHASE
+        )
 
         metrics = trainer.evaluate()
         trainer.log_metrics("eval", metrics)
