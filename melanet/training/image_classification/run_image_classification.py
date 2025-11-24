@@ -84,12 +84,12 @@ if __name__ == "__main__":
     # Script is run directly
     from loss_functions import FocalLoss, SupConLoss, SeesawLoss
     from metacentrum_utils import load_dataset_from_scratch, DATASET_SCRATCH_PREFIX
-    from train_utils import TrainerPhaseDetectorCallback
+    from train_utils import TrainerPhaseDetectorCallback, parse_kwargs_from_cli
 else:
     # Script is being imported or used from different location
     from .loss_functions import FocalLoss, SupConLoss, SeesawLoss
     from .metacentrum_utils import load_dataset_from_scratch, DATASET_SCRATCH_PREFIX
-    from .train_utils import TrainerPhaseDetectorCallback
+    from .train_utils import TrainerPhaseDetectorCallback, parse_kwargs_from_cli
 
 
 logger = logging.getLogger(__name__)
@@ -102,7 +102,7 @@ MODEL_CONFIG_CLASSES = list(MODEL_FOR_IMAGE_CLASSIFICATION_MAPPING.keys())
 MODEL_TYPES = tuple(conf.model_type for conf in MODEL_CONFIG_CLASSES)
 
 
-def pil_loader(path: str):
+def pil_loader(path: str) -> Image.Image:
     with open(path, "rb") as f:
         im = Image.open(f)
         return im.convert("RGB")
@@ -798,6 +798,23 @@ def main(args: Optional[dict[str, Any]] = None):
         # Set the validation transforms
         dataset["validation"].set_transform(val_transforms)
 
+    # Setup custom optimizer with kwargs
+    if TrainingArguments.default_optim != training_args.optim and training_args.optim_args is not None:
+        optim, base_optim_kwargs = Trainer.get_optimizer_cls_and_kwargs(training_args, model)
+        passed_optim_kwargs = parse_kwargs_from_cli(training_args.optim_args, optim)
+        optim_kwargs = {
+            **base_optim_kwargs,
+            **passed_optim_kwargs
+        }
+        optimizer_cls_and_kwargs = (optim, optim_kwargs)
+    else:
+        optimizer_cls_and_kwargs = None
+    logger.info(
+        f"Default optimizer will be used. The optimizer {training_args.optim} will be initialized from `Trainer.get_optimizer_cls_and_kwargs`"
+        if optimizer_cls_and_kwargs is None else
+        f"Initializing {optim} optimizer with custom parameters: {optim_kwargs}"
+    )
+
     # Augmentation transforms on data collected from `ImageProcessor`s
     apply_augmentations_prob = aux_args.apply_augmentations_prob if aux_args.apply_augmentations_prob is not None and aux_args.apply_augmentations_prob > 0.0 else 0.0
     apply_mixup_cutmix_prob = aux_args.apply_mixup_cutmix_prob if aux_args.apply_mixup_cutmix_prob is not None and aux_args.apply_mixup_cutmix_prob > 0.0 else 0.0
@@ -833,7 +850,7 @@ def main(args: Optional[dict[str, Any]] = None):
         return images, labels
 
     # Collect outputs from batched processing
-    class PhaseDataCollator:
+    class ImageDataCollatorWithPhase():
         def __init__(self, augment_phase: Union[str, list[str]] = "train", phase_callback: Optional[TrainerPhaseDetectorCallback] = None):
             self.phase_callback = phase_callback.get_trainer_phase if phase_callback is not None else lambda: None
             self.augment_phase = set([augment_phase,] if isinstance(augment_phase, str) else augment_phase)
@@ -850,7 +867,7 @@ def main(args: Optional[dict[str, Any]] = None):
             return {"pixel_values": pixel_values, "labels": labels}
 
     phase_callback = TrainerPhaseDetectorCallback()
-    data_collator = PhaseDataCollator(phase_callback=phase_callback)
+    data_collator = ImageDataCollatorWithPhase(phase_callback=phase_callback)
 
     # Initialize trainer
     trainer = Trainer(
@@ -863,6 +880,7 @@ def main(args: Optional[dict[str, Any]] = None):
         processing_class=image_processor,
         data_collator=data_collator,
         callbacks=[phase_callback],
+        optimizer_cls_and_kwargs=optimizer_cls_and_kwargs,
     )
 
     # Training
