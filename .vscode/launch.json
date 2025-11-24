@@ -13,8 +13,9 @@
             "console": "integratedTerminal",
             "args": [
                 // "--model_name_or_path", "/home/sulcm/models/melanet/google_hybrid_cnn_vit/base",
-                "--model_name_or_path", "timm/resnet50.a1_in1k",
+                // "--model_name_or_path", "timm/resnet50.a1_in1k",
                 // "--model_name_or_path", "timm/caformer_s18.sail_in1k_384",
+                "--model_name_or_path", "timm/convnextv2_base.fcmae_ft_in22k_in1k_384",
                 "--ignore_mismatched_sizes", "True",
                 "--dataset_name", "/home/sulcm/datasets/milk10k/SpilledMILK10k",
                 "--image_column_name", "image",
