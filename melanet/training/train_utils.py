@@ -9,11 +9,14 @@ from transformers import TrainerCallback
 
 
 class TrainerPhaseDetectorCallback(TrainerCallback):
+    TRAIN_PHASE = "train"
+    EVAL_PHASE = "eval"
+
     def __init__(self):
-        self.__trainer_phase: str = "train"
+        self.__trainer_phase: str = self.TRAIN_PHASE
 
     def __phase_from_trainer_control(self, control):
-        self._set_trainer_phase("eval" if control.should_evaluate else "train")
+        self._set_trainer_phase(self.EVAL_PHASE if control.should_evaluate else self.TRAIN_PHASE)
         return self.__trainer_phase
 
     def get_trainer_phase(self) -> str:

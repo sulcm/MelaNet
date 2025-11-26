@@ -694,6 +694,25 @@ def main(args: Optional[dict[str, Any]] = None):
                 timm_model_args["proj_drop_rate"] = aux_args.hidden_dropout
             if aux_args.attention_dropout:
                 timm_model_args["attn_drop"] = aux_args.attention_dropout
+        elif "convnext" in config.architecture:
+            if aux_args.final_dropout:
+                timm_model_args["drop_rate"] = aux_args.final_dropout
+            if aux_args.drop_path_rate:
+                timm_model_args["drop_path_rate"] = aux_args.drop_path_rate
+        elif "vit" in config.architecture:
+            if aux_args.final_dropout:
+                timm_model_args["drop_rate"] = aux_args.final_dropout
+            if aux_args.drop_path_rate:
+                timm_model_args["drop_path_rate"] = aux_args.drop_path_rate
+            if aux_args.hidden_dropout:
+                timm_model_args["proj_drop_rate"] = aux_args.hidden_dropout
+            if aux_args.attention_dropout:
+                timm_model_args["attn_drop_rate"] = aux_args.attention_dropout
+        elif "efficientnet" in config.architecture:
+            if aux_args.final_dropout:
+                timm_model_args["drop_rate"] = aux_args.final_dropout
+            if aux_args.drop_path_rate:
+                timm_model_args["drop_path_rate"] = aux_args.drop_path_rate
         else:
             pass
 
@@ -885,7 +904,9 @@ def main(args: Optional[dict[str, Any]] = None):
 
     # Training
     if training_args.do_train:
-        phase_callback._set_trainer_phase("train")
+        phase_callback._set_trainer_phase(
+            TrainerPhaseDetectorCallback.TRAIN_PHASE
+        )
 
         checkpoint = None
         if training_args.resume_from_checkpoint is not None:
@@ -900,7 +921,9 @@ def main(args: Optional[dict[str, Any]] = None):
 
     # Evaluation
     if training_args.do_eval:
-        phase_callback._set_trainer_phase("eval")
+        phase_callback._set_trainer_phase(
+            TrainerPhaseDetectorCallback.EVAL_PHASE
+        )
 
         metrics = trainer.evaluate()
         trainer.log_metrics("eval", metrics)

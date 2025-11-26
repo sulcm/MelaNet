@@ -1,0 +1,33 @@
+python run_image_classification.py \
+    --model_name_or_path timm/vit_base_patch16_384.orig_in21k_ft_in1k \
+    --ignore_mismatched_sizes True \
+    --dataset_name metacentrum_scratch/SpilledMILK10k \
+    --image_column_name image \
+    --label_column_name label \
+    --classification_task multiclass \
+    --remove_unused_columns False \
+    --output_dir /storage/plzen4-ntis/home/sulcm01/outputs/vit_base/melanet_vit_base_debug \
+    --overwrite_output_dir \
+    --num_train_epochs 30 \
+    --learning_rate 5e-4 \
+    --lr_scheduler_type cosine \
+    --warmup_ratio 0.05 \
+    --per_device_train_batch_size 64 \
+    --per_device_eval_batch_size 32 \
+    --gradient_accumulation_steps 1 \
+    --logging_strategy steps \
+    --logging_steps 100 \
+    --eval_strategy steps \
+    --eval_steps 1000 \
+    --save_strategy steps \
+    --save_steps 5000 \
+    --save_total_limit 2 \
+    --load_best_model_at_end True \
+    --metric_for_best_model eval_loss \
+    --greater_is_better False \
+    --do_train \
+    --do_eval \
+    --fp16 \
+    --report_to wandb \
+    --dataloader_num_workers 4 \
+    --seed 42

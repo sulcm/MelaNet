@@ -1,0 +1,101 @@
+name: Sweep-EfficientNet-CE-Regularization-Aug-SGD
+description: "EfficientNet v2 Base training with CE loss, regularization parameters set, and offline augmented dataset with online augmentations during training, SGD optimizer"
+method: bayes
+metric:
+  goal: minimize
+  name: eval/loss
+parameters:
+  # Model:
+  model_name_or_path:
+    value: "timm/tf_efficientnetv2_m.in21k_ft_in1k"
+  ignore_mismatched_sizes:
+    value: True
+  fp16:
+    value: True
+  # Dataset:
+  dataset_name:
+    value: "metacentrum_scratch/AugmentedMILK10k"
+  image_column_name:
+    value: "image"
+  label_column_name:
+    value: "label"
+  remove_unused_columns:
+    value: False
+  # Training:
+  classification_task:
+    value: "multiclass"
+  output_dir:
+    value: "/storage/plzen4-ntis/home/sulcm01/outputs/efficientnet_v2/melanet_efficientnet_v2_ce_reg_aug_sgd"
+  overwrite_output_dir:
+    value: True
+  save_steps:
+    value: 5000
+  save_total_limit:
+    value: 2
+  load_best_model_at_end:
+    value: True
+  metric_for_best_model:
+    value: "eval_loss"
+  greater_is_better:
+    value: False
+  logging_strategy:
+    value: "steps"
+  logging_steps:
+    value: 100
+  do_train:
+    value: True
+  do_eval:
+    value: True
+  report_to:
+    value: "wandb"
+  dataloader_num_workers:
+    value: 4
+  seed:
+    value: 42
+  # Hyperparameters:
+  num_train_epochs:
+    value: 50
+  optim:
+    value: "sgd"
+  optim_args:
+    value: "momentum=0.9,nesterov=True"
+  learning_rate:
+    min: 1e-5
+    max: 1e-2
+    distribution: log_uniform_values
+  apply_augmentations_prob:
+    min: 0.3
+    max: 0.9
+    distribution: log_uniform_values
+  apply_mixup_cutmix_prob:
+    min: 0.25
+    max: 0.75
+    distribution: log_uniform_values
+  weight_decay:
+    min: 1e-6
+    max: 1e-2
+    distribution: log_uniform_values
+  final_dropout:
+    min: 0.1
+    max: 0.5
+    distribution: log_uniform_values
+  drop_path_rate:
+    min: 1e-3
+    max: 0.3
+    distribution: log_uniform_values
+  lr_scheduler_type:
+    value: "cosine"
+  warmup_ratio:
+    value: 0.05
+  per_device_train_batch_size:
+    values: [32, 64]
+  gradient_accumulation_steps:
+    value: 1
+  per_device_eval_batch_size:
+    value: 32
+  eval_strategy:
+    value: "steps"
+  eval_steps:
+    value: 1000
+  save_strategy:
+    value: "steps"
