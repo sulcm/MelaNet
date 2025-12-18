@@ -20,7 +20,5 @@ For more information about used models check this [README](./models/README.md)
 ---
 
 ## Testing
-- Used metrics:
-    - Classification:
-        - Accuracy, F1, Precision, Recall
-        - ROC-AUC
+- same metrics as applied during final evaluation on test set
+- [directory](./eval/) with image classification evaluation
