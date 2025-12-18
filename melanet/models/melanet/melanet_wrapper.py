@@ -30,7 +30,7 @@ class MelaNet():
 
         if self.is_feature_extractor:
             assert model_name is not None or zero_shot_model_name is not None, "At least one of `model_name` or `zero_shot_model_name` must be provided"
-            self.feature_extractor_config = feature_extractor_config if feature_extractor_config is not None else create_default_feature_extractor_config()
+            self.__feature_extractor_config = feature_extractor_config if feature_extractor_config is not None else create_default_feature_extractor_config()
             if model_name is not None:
                 self.ft_model = HfModelWrapper(model_name=model_name, config=zero_shot_config, device=self.device)
             else:
@@ -45,6 +45,23 @@ class MelaNet():
             self.image_processor = AutoImageProcessor.from_pretrained(model_name)
             self.model = AutoModelForImageClassification.from_pretrained(model_name)
             self.model.eval().to(self.device)
+
+    @property
+    def feature_extractor_config(self) -> Optional[FeatureExtractorConfig]:
+        if self.is_feature_extractor:
+            return self.__feature_extractor_config
+        else:
+            return None
+
+    @property
+    def zero_shot_config(self) -> Optional[ZeroShotConfig]:
+        if self.is_feature_extractor:
+            if self.zero_shot_model is not None:
+                return self.zero_shot_model.config
+            else:
+                return None
+        else:
+            return None
 
     def forward(self, image, return_logits: bool = False) -> np.ndarray:
         inputs = self.image_processor(images=image, return_tensors="pt").to(self.device)
@@ -72,13 +89,13 @@ class MelaNet():
             ft_embeddings=ft_embeds,
             zero_shot_embeddings=zero_shot_embeds
         )
-        if self.feature_extractor_config.output_type == "object":
+        if self.__feature_extractor_config.output_type == "object":
             return output
-        elif self.feature_extractor_config.output_type == "sum":
+        elif self.__feature_extractor_config.output_type == "sum":
             return output.sum(
-                alpha=self.feature_extractor_config.alpha
+                alpha=self.__feature_extractor_config.alpha
             )
-        elif self.feature_extractor_config.output_type == "concat":
+        elif self.__feature_extractor_config.output_type == "concat":
             return output.concat()
         else:
             raise ValueError(

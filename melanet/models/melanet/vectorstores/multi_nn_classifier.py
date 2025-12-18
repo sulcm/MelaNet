@@ -1,6 +1,6 @@
 import numpy as np
 
-from typing import Optional, Union
+from typing import Optional
 
 from .nn_classifier import NNClassifier
 
@@ -34,29 +34,23 @@ class MultiNNClassifier():
             for (_idx_name, _embeds), _metric, _pca_c in zip(embeddings.items(), metric, pca_components)
         }
 
-    def predict(self, query_embeddings: list[np.ndarray], top_k: int = 5, search_k: int = 50, search_indexes: Optional[Union[str, list[str]]] = None) -> dict[str, list[list[tuple[int, float]]]]:
+    def predict(self, query_embeddings: dict[str, np.ndarray], top_k: int = 1, search_k: int = 20, return_distances: bool = False) -> dict[str, np.ndarray]:
         """
         Retrieve top-K unique classes for each query embedding.
         Args:
-            query_embeddings: list (len `search_indexes`) of np.ndarray of shape (Q, D)
+            query_embeddings: dict of index names to search with queries (np.ndarray of shape (Q, D))
             top_k: number of unique classes to return
             search_k: number of nearest neighbors to retrieve before filtering duplicates
-            search_indexes: names of indexes to use for searching
+            return_distances: return tuple per element with (class, distance)
         Returns:
-            List of lists of tuples [(class, distance), ...] per query
+            Dict with lists of results per index
         """
-        if search_indexes is None:
-            search_indexes = list(self.indexes.keys())
-        if isinstance(search_indexes, str):
-            search_indexes = [search_indexes,]
-        assert isinstance(query_embeddings, list) and len(query_embeddings) == len(search_indexes), f"`query_embeddings` must be the same lenght as `search_indexes`, got {len(query_embeddings)} and {len(search_indexes)}"
-
         search_results = {}
-        for index_name, query_embed in zip(search_indexes, query_embeddings):
+        for index_name, query_embed in query_embeddings.items():
             search_results[index_name] = self.indexes[index_name].predict(
                 query_embeddings=query_embed,
                 top_k=top_k,
-                search_k=search_k
+                search_k=search_k,
+                return_distances=return_distances
             )
-
         return search_results

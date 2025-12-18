@@ -2,10 +2,14 @@ import torch
 import numpy as np
 
 from typing import Optional
+from itertools import repeat
 from dataclasses import dataclass, field
 
 from .utils import normalize_embeddings
 from ..utils import tensor2numpy
+
+
+MELANET_FEATURES_PREFIX = "melanet_features"
 
 
 @dataclass
@@ -51,3 +55,16 @@ class FeatureExtractorOutput:
         _obj_dict["ft_embeddings"] = tensor2numpy(self.ft_embeddings) if self.have_ft_embeddings() else None
         _obj_dict["zero_shot_embeddings"] = tensor2numpy(self.zero_shot_embeddings) if self.have_zero_shot_embeddings() else None
         return _obj_dict
+
+    def to_list(self) -> list[dict[str, Optional[np.ndarray]]]:
+        _obj_dict = self.to_dict()
+        return [
+            {
+                "ft_embeddings": ft_embeds,
+                "zero_shot_embeddings": zs_embeds
+            }
+            for ft_embeds, zs_embeds in zip(
+                _obj_dict["ft_embeddings"] or repeat(None),
+                _obj_dict["zero_shot_embeddings"] or repeat(None)
+            )
+        ]

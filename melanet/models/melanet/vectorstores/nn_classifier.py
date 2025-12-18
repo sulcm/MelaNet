@@ -45,7 +45,7 @@ class NNClassifier():
 
         return index
 
-    def predict(self, query_embeddings: np.ndarray, top_k: int = 5, search_k: int = 50) -> list[list[tuple[int, float]]]:
+    def predict(self, query_embeddings: np.ndarray, top_k: int = 1, search_k: int = 20, return_distances: bool = False) -> np.ndarray:
         """
         Retrieve top-K unique classes for each query embedding.
         Args:
@@ -57,16 +57,25 @@ class NNClassifier():
         """
         if self.pca is not None:
             query_embeddings = self._pca(query_embeddings)
-        distances, indices = self.index.search(query_embeddings, search_k)
+        distances, indices = self.index.search(query_embeddings, 1 if top_k == 1 else search_k)
 
         results = []
         for dist_row, idx_row in zip(distances, indices):
-            seen = OrderedDict()
-            for d, idx in zip(dist_row, idx_row):
-                cls = self.idx2cls[idx]
-                if cls not in seen:
-                    seen[cls] = d
-                if len(seen) >= top_k:
-                    break
-            results.append(list(seen.items()))
-        return results
+            if top_k == 1:
+                cls = self.idx2cls[idx_row[0]]
+                dist = dist_row[0]
+                results.append(
+                    (cls, dist) if return_distances else cls
+                )
+            else:
+                seen = OrderedDict()
+                for d, idx in zip(dist_row, idx_row):
+                    cls = self.idx2cls[idx]
+                    if cls not in seen:
+                        seen[cls] = d
+                    if len(seen) >= top_k:
+                        break
+                results.append(
+                    list(seen.items()) if return_distances else list(seen.keys())
+                )
+        return np.array(results)

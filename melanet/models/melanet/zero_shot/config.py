@@ -34,9 +34,10 @@ class ZeroShotConfig(BaseModel):
     @classmethod
     def from_cli(cls, cli_options: str) -> "ZeroShotConfig":
         init_kwargs = {}
-        for mapping in cli_options.replace(" ", "").split(","):
-            key, value = mapping.split("=")
-            init_kwargs[key] = value
+        if cli_options is not None:
+            for mapping in cli_options.replace(" ", "").split(","):
+                key, value = mapping.split("=")
+                init_kwargs[key] = value
         return cls(**init_kwargs)
 
 

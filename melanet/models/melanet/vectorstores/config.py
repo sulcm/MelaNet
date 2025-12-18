@@ -14,13 +14,34 @@ class VectorStoreConfig(BaseModel):
         default=None,
         description="Optional use of PCA for dimension reduction during index build and search. Turn OFF using `None`."
     )
+    top_k: Optional[int] = Field(
+        default=1,
+        description="From retrieved results select first top K results."
+    )
+    search_k: Optional[int] = Field(
+        default=20,
+        description="Search for K closest elements in index. Only applied if `top_k > 1`."
+    )
+    return_distances: Optional[bool] = Field(
+        default=False,
+        description="Whether to return tuple `[(class, distance), ...]` or only `[class, ...]`."
+    )
+    rerank_top_n: Optional[int] = Field(
+        default=1,
+        description="Return top N reranked results."
+    )
+    rrf_k: Optional[float] = Field(
+        default=60.0,
+        description="Parameter K for RRF computation."
+    )
 
     @classmethod
     def from_cli(cls, cli_options: str) -> "VectorStoreConfig":
         init_kwargs = {}
-        for mapping in cli_options.replace(" ", "").split(","):
-            key, value = mapping.split("=")
-            init_kwargs[key] = value
+        if cli_options is not None:
+            for mapping in cli_options.replace(" ", "").split(","):
+                key, value = mapping.split("=")
+                init_kwargs[key] = value
         return cls(**init_kwargs)
 
 
