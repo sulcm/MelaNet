@@ -6,7 +6,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from typing import cast, Optional, Callable, Literal
+from typing import cast, Optional, Callable, Literal, Union
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -27,7 +27,7 @@ from torchmetrics import (
 
 from melanet.melanet_wrapper import MelaNet, FeatureExtractorConfig, ZeroShotConfig
 from melanet.embeddings.types import MELANET_FEATURES_PREFIX
-from melanet.vectorstores import VectorStoreConfig, MultiNNClassifier, NNClassifier
+from melanet.vectorstores import VectorStoreConfig, create_default_vector_store_config, MultiNNClassifier, NNClassifier
 from melanet.vectorstores.rrf import melanet_rrf
 from melanet.utils import tensor2value
 from metacentrum_utils import DATASET_SCRATCH_PREFIX, load_dataset_from_scratch
@@ -42,8 +42,11 @@ class EvaluateArguments:
     Arguments pertaining to how evaluate given model on dataset
     """
 
-    classification_task: Literal["binary", "multiclass", "multilabel", "feature_classification"] = field(
+    classification_task: Literal["binary", "multiclass", "multilabel"] = field(
         metadata={"help": "Specify classification task / objective. Possible values are 'binary', 'multiclass', 'multilabel', or 'feature_classification'."}
+    )
+    eval_as_feature_extraction: bool = field(
+        metadata={"help": "Init model and processing as classifier or feature extractor with vectorstores."}
     )
     dataset_name: str = field(
         metadata={"help": "Name of a dataset from the hub (could be your own, possibly private dataset hosted on the hub)."},
@@ -68,6 +71,16 @@ class EvaluateArguments:
     index_split: Optional[str] = field(
         default=None,
         metadata={"help": "Used for `feature_classification` to build index."}
+    )
+    index_size: Optional[Union[int, float]] = field(
+        default=None,
+        metadata={"help": (
+            "Specify size of build index."
+            " - `int` randomly select samples"
+            " - `float` randomly select given portion of dataset, must be in interval (0.0; 1.0)"
+            " - `None` then use full dataset"
+            )
+        }
     )
     feature_extractor_config: Optional[str] = field(
         default=None,
@@ -103,12 +116,17 @@ class EvaluateArguments:
         default="cuda",
         metadata={"help": "Select which device to use for inference."}
     )
+    seed: Optional[int] = field(
+        default=42,
+        metadata={"help": "Random seed that will be set to ensure reproducibility. Defaults to 42."}
+    )
 
 
 def _get_classification_metrics(
     task: Literal["binary", "multiclass", "multilabel"],
     num_classes: Optional[int] = None,
-    average: Optional[str] = "macro"
+    average: Optional[str] = "macro",
+    eval_feature_extraction: bool = False,
 ):
     assert task != "binary" and num_classes is not None, "For multiclass tasks provide number of classes"
 
@@ -154,6 +172,11 @@ def _get_classification_metrics(
             average=average
         ),
     }
+
+    if eval_feature_extraction:
+        for unsupported_metric in ("ap", "roc_auc"):
+            _ = metrics.pop(unsupported_metric, None)
+
     return metrics
 
 
@@ -280,7 +303,7 @@ def feature_extraction_predict(model: MelaNet, index: Dataset, dataset: Dataset,
     features_columns = [col for col in index.column_names if col.startswith(MELANET_FEATURES_PREFIX)]
     assert features_columns, "Can not find extracted features"
 
-    vector_store_config = VectorStoreConfig.from_cli(eval_args.vector_store_config) if eval_args.vector_store_config is not None else None
+    vector_store_config = VectorStoreConfig.from_cli(eval_args.vector_store_config) if eval_args.vector_store_config is not None else create_default_vector_store_config()
     if len(features_columns) > 1:
         vector_store = MultiNNClassifier(
             cls_ids=np.asarray(index[eval_args.label_column_name]),
@@ -333,14 +356,30 @@ def feature_extraction_predict(model: MelaNet, index: Dataset, dataset: Dataset,
 
 
 def evaluate(eval_args: EvaluateArguments):
-    is_feature_extractor = eval_args.classification_task == "feature_classification"
-
     # Prepare and load dataset
-    if is_feature_extractor:
+    if eval_args.eval_as_feature_extraction:
+        assert eval_args.label_column_name is not None, "When using feature extractor then index must include class labels"
+
         index = load_and_validate_dataset(eval_args=eval_args, dataset_split=eval_args.index_split)
         dataset = load_and_validate_dataset(eval_args=eval_args, dataset_split=eval_args.eval_split)
 
         labels = get_labels_from_dataset(dataset=dataset, eval_args=eval_args)
+        if eval_args.index_size is not None:
+            if isinstance(eval_args.index_size, int):
+                assert eval_args.index_size < len(index), "Specify number of samples that is lower then size of the dataset"
+                split_perc = eval_args.index_size / len(index)
+            elif isinstance(eval_args.index_size, float):
+                assert 0.0 < eval_args.index_size < 1.0, "Specify portion of dataset to use by value between 0.0 and 1.0"
+                split_perc = eval_args.index_size
+            else:
+                raise ValueError("If specifying index size to use then provide `int` or `float` value")
+
+            index = index.train_test_split(
+                train_size=split_perc,
+                shuffle=True,
+                stratify_by_column=eval_args.label_column_name,
+                seed=eval_args.seed
+            )["train"]
     else:
         index = None
         dataset = load_and_validate_dataset(eval_args=eval_args, dataset_split=eval_args.eval_split)
@@ -350,13 +389,14 @@ def evaluate(eval_args: EvaluateArguments):
     # Load metrics for given task
     metrics = _get_classification_metrics(
         task=eval_args.classification_task,
-        num_classes=len(labels)
+        num_classes=len(labels),
+        eval_feature_extraction=eval_args.eval_as_feature_extraction
     ) if labels is not None else None
 
     # Init model
     model = MelaNet(
         model_name=eval_args.model_name_or_path,
-        is_feature_extractor=is_feature_extractor,
+        is_feature_extractor=eval_args.eval_as_feature_extraction,
         feature_extractor_config=FeatureExtractorConfig.from_cli(eval_args.feature_extractor_config) if eval_args.feature_extractor_config is not None else None,
         zero_shot_model_name=eval_args.zero_shot_model_name_or_path,
         zero_shot_config=ZeroShotConfig.from_cli(eval_args.zero_shot_config) if eval_args.zero_shot_config is not None else None,
@@ -364,7 +404,7 @@ def evaluate(eval_args: EvaluateArguments):
     )
 
     # Run evaluation
-    if is_feature_extractor:
+    if eval_args.eval_as_feature_extraction:
         predictions = feature_extraction_predict(
             model=model,
             index=index,
@@ -383,11 +423,13 @@ def evaluate(eval_args: EvaluateArguments):
     results = {
         "datetime": datetime.now().isoformat(),
         "model": eval_args.model_name_or_path,
+        "zero_shot_model": eval_args.zero_shot_model_name_or_path,
         "dataset": {
             "name": eval_args.dataset_name,
-            "split": eval_args.dataset_split
+            "split": eval_args.eval_split
         },
         "task": eval_args.classification_task,
+        "as_feature_extractor": eval_args.eval_as_feature_extraction,
         "predictions": predictions.tolist(),
     }
     if metrics is not None:
