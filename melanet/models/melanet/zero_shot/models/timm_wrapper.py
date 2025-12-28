@@ -14,7 +14,7 @@ class TimmModelWrapper():
     def __init__(self, model_name: str, config: Optional[ZeroShotConfig] = None, device: str = "cuda"):
         self.device = resolve_device(device)
 
-        self.config = config if config is not None else create_default_zero_shot_config()
+        self.config = config if config is not None else create_default_zero_shot_config(model_backend="timm")
 
         self.model = timm.create_model(
             model_name,

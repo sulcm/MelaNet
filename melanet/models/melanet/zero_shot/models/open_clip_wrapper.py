@@ -12,7 +12,7 @@ class OpenCLIPWrapper():
     def __init__(self, model_name: str, config: Optional[ZeroShotConfig] = None, device: str = "cuda"):
         self.device = resolve_device(device)
 
-        self.config = config if config is not None else create_default_zero_shot_config()
+        self.config = config if config is not None else create_default_zero_shot_config(model_backend="open_clip")
 
         self.model, _, self.image_processor = open_clip.create_model_and_transforms(model_name)
         self.model.eval().to(self.device)

@@ -25,8 +25,8 @@ class FeatureExtractorConfig(BaseModel):
         return cls(**init_kwargs)
 
 
-def create_default_feature_extractor_config() -> FeatureExtractorConfig:
-    def_feature_extractor_cfg = FeatureExtractorConfig()
+def create_default_feature_extractor_config(**kwargs) -> FeatureExtractorConfig:
+    def_feature_extractor_cfg = FeatureExtractorConfig(**kwargs)
 
     if def_feature_extractor_cfg.output_type == "sum":
         assert def_feature_extractor_cfg.alpha is not None

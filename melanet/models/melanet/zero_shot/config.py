@@ -41,8 +41,8 @@ class ZeroShotConfig(BaseModel):
         return cls(**init_kwargs)
 
 
-def create_default_zero_shot_config() -> ZeroShotConfig:
-    def_zero_shot_cfg = ZeroShotConfig()
+def create_default_zero_shot_config(**kwargs) -> ZeroShotConfig:
+    def_zero_shot_cfg = ZeroShotConfig(**kwargs)
 
     if def_zero_shot_cfg.output_type == "sum":
         assert def_zero_shot_cfg.alpha is not None

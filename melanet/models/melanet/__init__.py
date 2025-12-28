@@ -1,0 +1,1 @@
+from .melanet_wrapper import MelaNet, ZeroShotConfig, FeatureExtractorConfig

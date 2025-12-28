@@ -45,7 +45,7 @@ class VectorStoreConfig(BaseModel):
         return cls(**init_kwargs)
 
 
-def create_default_vector_store_config() -> VectorStoreConfig:
-    def_vector_store_cfg = VectorStoreConfig()
+def create_default_vector_store_config(**kwargs) -> VectorStoreConfig:
+    def_vector_store_cfg = VectorStoreConfig(**kwargs)
 
     return def_vector_store_cfg
