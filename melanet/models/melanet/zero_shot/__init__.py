@@ -1,0 +1,2 @@
+from .zero_shot_wrapper import ZeroShotModel
+from .config import ZeroShotConfig, create_default_zero_shot_config
