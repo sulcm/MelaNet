@@ -57,7 +57,7 @@ class InfoNCE(nn.Module):
                 neg_logits = torch.einsum("nd,nmd->nm", features, negative_targets)   # (N, M)
 
             logits = torch.cat([pos_logits, neg_logits], dim=1)
-            labels = torch.zeros_like(features, dtype=torch.long)
+            labels = torch.zeros(features.size(0), dtype=torch.long, device=features.device)
         else:
             if targets is not None:
                 logits = features @ targets.T
@@ -77,3 +77,59 @@ class InfoNCE(nn.Module):
             reduction=self.reduction
         )
         return loss
+
+
+class SymmetricInfoNCE(nn.Module):
+    def __init__(
+        self,
+        temperature: float = 0.07,
+        reduction: str = "mean",
+        negative_mode: str = "unpaired"
+    ):
+        super(SymmetricInfoNCE, self).__init__()
+
+        self.info_nce = InfoNCE(
+            temperature=temperature,
+            reduction=reduction,
+            negative_mode=negative_mode
+        )
+
+    @property
+    def temperature(self):
+        return self.info_nce.temperature
+
+    @temperature.setter
+    def temperature(self, temperature: float):
+        self.info_nce.temperature = temperature
+
+    @property
+    def reduction(self):
+        return self.info_nce.reduction
+
+    @reduction.setter
+    def reduction(self, reduction: str):
+        self.info_nce.reduction = reduction
+
+    @property
+    def negative_mode(self):
+        return self.info_nce.negative_mode
+
+    @negative_mode.setter
+    def negative_mode(self, negative_mode: str):
+        self.info_nce.negative_mode = negative_mode
+
+    def forward(
+        self,
+        features_A: torch.Tensor,
+        features_B: torch.Tensor,
+        negative_targets_A: Optional[torch.Tensor] = None,
+        negative_targets_B: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
+        return torch.div(
+            self.info_nce(
+                features_A, features_B, negative_targets_A
+            ) + self.info_nce(
+                features_B, features_A, negative_targets_B
+            ),
+            2
+        )
