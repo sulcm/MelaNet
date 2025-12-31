@@ -5,10 +5,11 @@ from typing import Optional
 
 from sklearn.decomposition import PCA
 
+from .base import BaseAdapter
 from ..embeddings.utils import normalize_embeddings
 
 
-class PCAAdapter():
+class PCAAdapter(BaseAdapter):
     def __init__(
         self,
         out_features: int,
