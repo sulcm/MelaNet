@@ -26,3 +26,9 @@ The work was carried out as part of a master's thesis (2025/2026) at the Faculty
     pip install -r melanet/requirements.txt
     ```
     Command for installing required dependencies defined in `melanet/requirements.txt` file.
+
+---
+
+## MelaNet Sub-Module
+
+Implementation of model wrapper and utilities can be found [here](./melanet/models/melanet/).
