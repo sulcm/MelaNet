@@ -713,6 +713,15 @@ def main(args: Optional[dict[str, Any]] = None):
                 timm_model_args["drop_rate"] = aux_args.final_dropout
             if aux_args.drop_path_rate:
                 timm_model_args["drop_path_rate"] = aux_args.drop_path_rate
+        elif "swin" in config.architecture:
+            if aux_args.final_dropout:
+                timm_model_args["drop_rate"] = aux_args.final_dropout
+            if aux_args.drop_path_rate:
+                timm_model_args["drop_path_rate"] = aux_args.drop_path_rate
+            if aux_args.hidden_dropout:
+                timm_model_args["proj_drop_rate"] = aux_args.hidden_dropout
+            if aux_args.attention_dropout:
+                timm_model_args["attn_drop_rate"] = aux_args.attention_dropout
         else:
             pass
 
