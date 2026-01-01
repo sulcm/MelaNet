@@ -5,3 +5,4 @@ trainer_output
 .ipynb_checkpoints
 JupyterLab*
 melanet/eval/outputs
+melanet/models/data

@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from typing import Optional
+
 
 class SupConLoss(nn.Module):
     """Supervised Contrastive Loss as in:
@@ -9,12 +11,18 @@ class SupConLoss(nn.Module):
 
     Args:
         temperature (float): scaling factor for similarity scores
+        base_temperature (float): scaling for loss normalization
         contrast_mode (str): 'all' or 'one'. Defaults to 'all'
             - 'all' -> contrast against all positives
             - 'one' -> contrast only against one positive
-        base_temperature (float): scaling for loss normalization
     """
-    def __init__(self, temperature: float=0.07, contrast_mode="all", base_temperature: float=0.07, eps: float=1e-12):
+    def __init__(
+        self,
+        temperature: float = 0.07,
+        base_temperature: float = 0.07,
+        contrast_mode = "all",
+        eps: float = 1e-12
+    ):
         super(SupConLoss, self).__init__()
 
         self.temperature = temperature
@@ -22,7 +30,12 @@ class SupConLoss(nn.Module):
         self.base_temperature = base_temperature
         self.eps = eps
 
-    def forward(self, features, labels=None, mask=None):
+    def forward(
+        self,
+        features: torch.Tensor,
+        labels: Optional[torch.Tensor] = None,
+        mask: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
         """
         Args:
             features: hidden vector of shape [batch_size, n_views, dim]
@@ -65,10 +78,10 @@ class SupConLoss(nn.Module):
 
         contrast_count = n_views
         if self.contrast_mode == "one":
-            anchor_feature = features[:, 0]   # only first view as anchor
+            anchor_feature = features[:, 0]     # only first view as anchor
             anchor_count = 1
         elif self.contrast_mode == "all":
-            anchor_feature = contrast_feature  # all views are anchors
+            anchor_feature = contrast_feature   # all views are anchors
             anchor_count = contrast_count
         else:
             raise ValueError(f"Unknown contrast_mode: {self.contrast_mode}")
@@ -96,5 +109,5 @@ class SupConLoss(nn.Module):
 
         # Loss
         loss = - (self.temperature / self.base_temperature) * mean_log_prob_pos
-        loss = loss.view(batch_size, n_views).mean()
+        loss = loss.view(anchor_count, batch_size).mean()
         return loss

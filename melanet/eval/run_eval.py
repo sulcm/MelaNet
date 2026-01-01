@@ -6,7 +6,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from typing import cast, Optional, Callable, Literal
+from typing import cast, Optional, Callable, Literal, Union
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -25,7 +25,11 @@ from torchmetrics import (
     NegativePredictiveValue
 )
 
-from melanet import MelaNet
+from melanet.melanet_wrapper import MelaNet, FeatureExtractorConfig, ZeroShotConfig
+from melanet.embeddings.types import MELANET_FEATURES_PREFIX
+from melanet.vectorstores import VectorStoreConfig, create_default_vector_store_config, MultiNNClassifier, NNClassifier
+from melanet.vectorstores.rrf import melanet_rrf
+from melanet.utils import tensor2value
 from metacentrum_utils import DATASET_SCRATCH_PREFIX, load_dataset_from_scratch
 
 
@@ -39,10 +43,10 @@ class EvaluateArguments:
     """
 
     classification_task: Literal["binary", "multiclass", "multilabel"] = field(
-        metadata={"help": "Specify classification task / objective. Possible values are 'binary', 'multiclass', or 'multilabel'."}
+        metadata={"help": "Specify classification task / objective. Possible values are 'binary', 'multiclass', 'multilabel', or 'feature_classification'."}
     )
-    model_name_or_path: str = field(
-        metadata={"help": "Path to finetuned model or model identifier from huggingface.co/models"},
+    eval_as_feature_extraction: bool = field(
+        metadata={"help": "Init model and processing as classifier or feature extractor with vectorstores."}
     )
     dataset_name: str = field(
         metadata={"help": "Name of a dataset from the hub (could be your own, possibly private dataset hosted on the hub)."},
@@ -50,11 +54,63 @@ class EvaluateArguments:
     results_path: str = field(
         metadata={"help": "Path and file where to save results. Must be JSON file."}
     )
-    dataset_split: Optional[str] = field(
+    model_name_or_path: Optional[str] = field(
+        default=None,
+        metadata={"help": "Path to finetuned model or model identifier from huggingface.co/models. Can be `None` for `feature_classification` when using zero-shot model."},
+    )
+    zero_shot_model_name_or_path: Optional[str] = field(
+        default=None,
+        metadata={"help": "Path to pre-trained zero-shot model or model identifier from huggingface.co/models. Only used when `feature_classification` is active."},
+    )
+    eval_split: Optional[str] = field(
         default=None,
         metadata={
             "help": "If `None` then assume its single dataset of type `Dataset` otherwise provide name of the split or splits (e.g. 'test', 'validation+test', etc.)."
         }
+    )
+    index_split: Optional[str] = field(
+        default=None,
+        metadata={"help": "Used for `feature_classification` to build index."}
+    )
+    index_size: Optional[Union[int, float]] = field(
+        default=None,
+        metadata={"help": (
+            "Specify size of build index."
+            " - `int` randomly select samples"
+            " - `float` randomly select given portion of dataset, must be in interval (0.0; 1.0)"
+            " - `None` then use full dataset"
+            )
+        }
+    )
+    feature_extractor_config: Optional[str] = field(
+        default=None,
+        metadata={"help": "Used for configuring feature extraction process."}
+    )
+    zero_shot_config: Optional[str] = field(
+        default=None,
+        metadata={"help": "Used for configuring zero-shot process."}
+    )
+    feature_adapter: Optional[Literal["pca", "linear", "fusion"]] = field(
+        default=None,
+        metadata={"help": (
+            "Create adapter that will be used for transforming extracted features. Possible options:"
+            " - 'pca': Initialize PCA adapter that will select N components (lower dimension)"
+            " - 'linear': Initialize simple linear projection layer that will simply transform embedding of one size to another"
+            " - 'fusion': Initialize MLP that will combine embeddings from 2 models into single representation"
+            )
+        }
+    )
+    feature_adapter_path: Optional[str] = field(
+        default=None,
+        metadata={"help": "Provide path from or where feature adapter will be loaded and/or saved."}
+    )
+    feature_adapter_config: Optional[str] = field(
+        default=None,
+        metadata={"help": "Used for configuring adapters."}
+    )
+    vector_store_config: Optional[str] = field(
+        default=None,
+        metadata={"help": "Used for configuring vector stores."}
     )
     batch_size: int = field(
         default=8,
@@ -78,12 +134,17 @@ class EvaluateArguments:
         default="cuda",
         metadata={"help": "Select which device to use for inference."}
     )
+    seed: Optional[int] = field(
+        default=42,
+        metadata={"help": "Random seed that will be set to ensure reproducibility. Defaults to 42."}
+    )
 
 
 def _get_classification_metrics(
     task: Literal["binary", "multiclass", "multilabel"],
     num_classes: Optional[int] = None,
-    average: Optional[str] = "macro"
+    average: Optional[str] = "macro",
+    eval_feature_extraction: bool = False,
 ):
     assert task != "binary" and num_classes is not None, "For multiclass tasks provide number of classes"
 
@@ -129,28 +190,15 @@ def _get_classification_metrics(
             average=average
         ),
     }
+
+    if eval_feature_extraction:
+        for unsupported_metric in ("ap", "roc_auc"):
+            _ = metrics.pop(unsupported_metric, None)
+
     return metrics
 
 
-def metrics_update_state(predictions, label_ids, metrics: dict[str, Callable]):
-    """Computes accuracy on a batch of predictions"""
-    logits = torch.tensor(predictions)
-    target = torch.tensor(label_ids)
-    # preds = torch.argmax(logits, dim=-1)
-    probs = F.softmax(logits, dim=-1)
-
-    for metric_name, metric in metrics.items():
-        _res = metric(
-            preds=probs,
-            target=target
-        )
-
-
-def tensor_to_value(x: torch.Tensor):
-    return x.item() if x.numel() == 1 else x.tolist()
-
-
-def evaluate(eval_args: EvaluateArguments):
+def load_and_validate_dataset(eval_args: EvaluateArguments, dataset_split: Optional[str] = None) -> Dataset:
     if os.path.exists(eval_args.dataset_name):
         # Load from local path
         logger.info(f"Loading dataset {eval_args.dataset_name} from local path")
@@ -168,16 +216,18 @@ def evaluate(eval_args: EvaluateArguments):
         logger.info(f"Loading dataset {eval_args.dataset_name} from HF Hub")
         dataset = load_dataset(
             eval_args.dataset_name,
-            split=eval_args.dataset_split
+            split=dataset_split
         )
     if not isinstance(dataset, Dataset):
+        assert dataset_split is not None, "For datasets of type `DatasetDict` you must specify splits to use"
         dataset: Dataset = concatenate_datasets(
             [
                 dataset[split]
-                for split in eval_args.dataset_split.split("+")
+                for split in dataset_split.split("+")
             ]
         )
 
+    # Validate dataset (check required columns)
     if eval_args.image_column_name not in dataset.column_names:
         raise ValueError(
             f"--image_column_name {eval_args.image_column_name} not found in dataset '{eval_args.dataset_name}'. "
@@ -185,7 +235,11 @@ def evaluate(eval_args: EvaluateArguments):
             f"{', '.join(dataset.column_names)}."
         )
 
-    labels: Optional[list] = None
+    return dataset
+
+
+def get_labels_from_dataset(dataset: Dataset, eval_args: EvaluateArguments) -> Optional[list]:
+    labels = None
     label_column = eval_args.label_column_name
     if label_column is not None:
         if label_column not in dataset.column_names:
@@ -198,43 +252,207 @@ def evaluate(eval_args: EvaluateArguments):
         labels = dataset.features[label_column].names
     else:
         labels = None
+    return labels
 
-    metrics = _get_classification_metrics(
-        task=eval_args.classification_task,
-        num_classes=len(labels)
-    ) if labels is not None else None
 
-    model = MelaNet(
-        model_name=eval_args.model_name_or_path,
-        device=eval_args.device
-    )
+def metrics_update_state(predictions, label_ids, metrics: dict[str, Callable], predictions_type: Literal["logits", "probs", "labels"] = "logits"):
+    """Computes accuracy on a batch of predictions"""
+    target = torch.tensor(label_ids)
+    t_predictions = torch.tensor(predictions)
+    if predictions_type == "logits":
+        probs = F.softmax(t_predictions, dim=-1)
+        preds = probs.argmax(dim=-1)
+    elif predictions_type == "probs":
+        preds = t_predictions.argmax(dim=-1)
+    elif predictions_type == "labels":
+        preds = t_predictions
+    else:
+        ValueError(f"Unsupported prediction type of '{predictions_type}'. Must be one of ('logits', 'probs', 'labels').")
 
+    for metric_name, metric in metrics.items():
+        _res = metric(
+            preds=preds,
+            target=target
+        )
+
+
+def classifier_predict(model: MelaNet, dataset: Dataset, eval_args: EvaluateArguments, metrics: Optional[dict] = None) -> np.ndarray:
     def map_eval(batch):
-        predictions = model(batch[eval_args.image_column_name], return_logits=True)
+        with torch.no_grad():
+            predictions = model(
+                batch[eval_args.image_column_name],
+                return_logits=True
+            )
         batch["predictions"] = predictions
         if metrics is not None:
             metrics_update_state(
                 predictions=predictions,
-                label_ids=batch[label_column],
-                metrics=metrics
+                label_ids=batch[eval_args.label_column_name],
+                metrics=metrics,
+                predictions_type="logits"
             )
         return batch
 
     dataset = dataset.map(map_eval, batched=True, batch_size=eval_args.batch_size, desc="Evaluating model", load_from_cache_file=False)
     predictions = np.argmax(dataset["predictions"], axis=-1)
+    return predictions
+
+
+def feature_extraction_predict(model: MelaNet, index: Dataset, dataset: Dataset, eval_args: EvaluateArguments, metrics: Optional[dict] = None) -> np.ndarray:
+    is_model_output_object = model.feature_extractor_config.output_type == "object"
+
+    def map_feature_extraction(batch):
+        with torch.no_grad():
+            features = model(
+                batch[eval_args.image_column_name]
+            )
+        if is_model_output_object:
+            features = features.to_dict()
+            for feat_name in features.keys():
+                if features[feat_name] is not None:
+                    batch[MELANET_FEATURES_PREFIX + "_" + feat_name] = features[feat_name]
+        else:
+            batch[MELANET_FEATURES_PREFIX + "_embeddings"] = features
+        return batch
+
+    index = index.map(map_feature_extraction, batched=True, batch_size=eval_args.batch_size, desc="Extractiong features for index", load_from_cache_file=False)
+    dataset = dataset.map(map_feature_extraction, batched=True, batch_size=eval_args.batch_size, desc="Extractiong features for eval dataset", load_from_cache_file=False)
+
+    features_columns = [col for col in index.column_names if col.startswith(MELANET_FEATURES_PREFIX)]
+    assert features_columns, "Can not find extracted features"
+
+    vector_store_config = VectorStoreConfig.from_cli(eval_args.vector_store_config) if eval_args.vector_store_config is not None else create_default_vector_store_config()
+    if len(features_columns) > 1:
+        vector_store = MultiNNClassifier(
+            cls_ids=np.asarray(index[eval_args.label_column_name]),
+            embeddings={
+                feat_name: np.asarray(index[feat_name])
+                for feat_name in features_columns
+            },
+            metric=vector_store_config.metric,
+            pca_components=vector_store_config.pca_components
+        )
+
+        indexes_preds = vector_store.predict(
+            query_embeddings={
+                feat_name: np.asarray(dataset[feat_name])
+                for feat_name in features_columns
+            },
+            top_k=vector_store_config.top_k,
+            search_k=vector_store_config.search_k,
+            return_distances=vector_store_config.return_distances
+        )
+        predictions = melanet_rrf(
+            retrieved_results=indexes_preds,
+            top_n=vector_store_config.rerank_top_n,
+            k=vector_store_config.rrf_k
+        )
+    else:
+        vector_store = NNClassifier(
+            cls_ids=np.asarray(index[eval_args.label_column_name]),
+            embeddings=np.asarray(index[features_columns[0]]),
+            metric=vector_store_config.metric,
+            pca_components=vector_store_config.pca_components
+        )
+
+        predictions = vector_store.predict(
+            query_embeddings= np.asarray(dataset[features_columns[0]]),
+            top_k=vector_store_config.top_k,
+            search_k=vector_store_config.search_k,
+            return_distances=vector_store_config.return_distances
+        )
+
+    if metrics is not None:
+        metrics_update_state(
+            predictions=predictions,
+            label_ids=dataset[eval_args.label_column_name],
+            metrics=metrics,
+            predictions_type="labels"
+        )
+
+    return predictions
+
+
+def evaluate(eval_args: EvaluateArguments):
+    # Prepare and load dataset
+    if eval_args.eval_as_feature_extraction:
+        assert eval_args.label_column_name is not None, "When using feature extractor then index must include class labels"
+
+        index = load_and_validate_dataset(eval_args=eval_args, dataset_split=eval_args.index_split)
+        dataset = load_and_validate_dataset(eval_args=eval_args, dataset_split=eval_args.eval_split)
+
+        labels = get_labels_from_dataset(dataset=dataset, eval_args=eval_args)
+        if eval_args.index_size is not None:
+            if isinstance(eval_args.index_size, int):
+                assert eval_args.index_size < len(index), "Specify number of samples that is lower then size of the dataset"
+                split_perc = eval_args.index_size / len(index)
+            elif isinstance(eval_args.index_size, float):
+                assert 0.0 < eval_args.index_size < 1.0, "Specify portion of dataset to use by value between 0.0 and 1.0"
+                split_perc = eval_args.index_size
+            else:
+                raise ValueError("If specifying index size to use then provide `int` or `float` value")
+
+            index = index.train_test_split(
+                train_size=split_perc,
+                shuffle=True,
+                stratify_by_column=eval_args.label_column_name,
+                seed=eval_args.seed
+            )["train"]
+    else:
+        index = None
+        dataset = load_and_validate_dataset(eval_args=eval_args, dataset_split=eval_args.eval_split)
+
+        labels = get_labels_from_dataset(dataset=dataset, eval_args=eval_args)
+
+    # Load metrics for given task
+    metrics = _get_classification_metrics(
+        task=eval_args.classification_task,
+        num_classes=len(labels),
+        eval_feature_extraction=eval_args.eval_as_feature_extraction
+    ) if labels is not None else None
+
+    # Init model
+    model = MelaNet(
+        model_name=eval_args.model_name_or_path,
+        is_feature_extractor=eval_args.eval_as_feature_extraction,
+        feature_extractor_config=FeatureExtractorConfig.from_cli(eval_args.feature_extractor_config) if eval_args.feature_extractor_config is not None else None,
+        zero_shot_model_name=eval_args.zero_shot_model_name_or_path,
+        zero_shot_config=ZeroShotConfig.from_cli(eval_args.zero_shot_config) if eval_args.zero_shot_config is not None else None,
+        device=eval_args.device
+    )
+
+    # Run evaluation
+    if eval_args.eval_as_feature_extraction:
+        predictions = feature_extraction_predict(
+            model=model,
+            index=index,
+            dataset=dataset,
+            eval_args=eval_args,
+            metrics=metrics
+        )
+    else:
+        predictions = classifier_predict(
+            model=model,
+            dataset=dataset,
+            eval_args=eval_args,
+            metrics=metrics
+        )
+
     results = {
         "datetime": datetime.now().isoformat(),
         "model": eval_args.model_name_or_path,
+        "zero_shot_model": eval_args.zero_shot_model_name_or_path,
         "dataset": {
             "name": eval_args.dataset_name,
-            "split": eval_args.dataset_split
+            "split": eval_args.eval_split
         },
         "task": eval_args.classification_task,
+        "as_feature_extractor": eval_args.eval_as_feature_extraction,
         "predictions": predictions.tolist(),
     }
     if metrics is not None:
         eval_metric = {
-            metric_name: tensor_to_value(metric.compute().float())
+            metric_name: tensor2value(metric.compute().float())
             for metric_name, metric in metrics.items()
         }
         results["metrics"] = eval_metric
