@@ -5,6 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from .base import LearnableAdapter
+from .config import FeatureAdapterConfig
 
 
 class LinearAdapter(LearnableAdapter):
@@ -13,7 +14,7 @@ class LinearAdapter(LearnableAdapter):
         in_features: int,
         out_features: int,
         bias: bool = False,
-        normalize: bool = False
+        normalize: bool = True
     ):
         super(LinearAdapter, self).__init__()
 
@@ -47,3 +48,16 @@ class LinearAdapter(LearnableAdapter):
             },
             save_path
         )
+
+    @classmethod
+    def from_config(cls, config: FeatureAdapterConfig) -> "LinearAdapter":
+        assert config.in_features_A is not None or config.in_features_B is not None
+        in_features = config.in_features_A or config.in_features_B
+        init_kwargs = {
+            "in_features": in_features,
+            "out_features": config.out_features,
+            "bias": config.bias,
+            "normalize": config.output_l2_norm
+        }
+        init_kwargs = {k: v for k, v in init_kwargs if v is not None}
+        return cls(**init_kwargs)

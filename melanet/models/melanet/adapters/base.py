@@ -7,6 +7,7 @@ from abc import ABC, abstractmethod
 from torch.utils.data import DataLoader, TensorDataset
 from transformers import Trainer, TrainingArguments, set_seed
 
+from .config import FeatureAdapterConfig
 from ..utils import resolve_device
 
 
@@ -14,12 +15,17 @@ class BaseAdapter(ABC):
     _is_fitted: bool = False
 
     @abstractmethod
-    def fit(self, *args, **kwargs) -> None:
+    def fit(self, *args, **kwargs) -> "BaseAdapter":
         ...
 
     @classmethod
     @abstractmethod
     def from_pretrained(cls, pretrained_path: str) -> "BaseAdapter":
+        ...
+
+    @classmethod
+    @abstractmethod
+    def from_config(cls, config: FeatureAdapterConfig) -> "BaseAdapter":
         ...
 
     @abstractmethod
@@ -28,6 +34,12 @@ class BaseAdapter(ABC):
 
 
 class LearnableAdapter(nn.Module, BaseAdapter):
+    activation_str2fn = {
+        "gelu": nn.GELU,
+        "relu": nn.ReLU,
+        "silu": nn.SiLU,
+    }
+
     def fit(
         self,
         X: torch.Tensor,
@@ -44,7 +56,7 @@ class LearnableAdapter(nn.Module, BaseAdapter):
         shuffle: bool = True,
         device: str = "cuda",
         seed: Optional[int] = 42
-    ) -> None:
+    ) -> "LearnableAdapter":
         if seed is not None:
             set_seed(seed)
         device = resolve_device(device)
@@ -121,6 +133,7 @@ class LearnableAdapter(nn.Module, BaseAdapter):
 
         self._is_fitted = True
         self.eval()
+        return self
 
     @classmethod
     def from_pretrained(cls, pretrained_path: str) -> "LearnableAdapter":

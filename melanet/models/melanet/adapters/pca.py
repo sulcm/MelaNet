@@ -6,6 +6,7 @@ from typing import Optional
 from sklearn.decomposition import PCA
 
 from .base import BaseAdapter
+from .config import FeatureAdapterConfig
 from ..embeddings.utils import normalize_embeddings
 
 
@@ -15,7 +16,7 @@ class PCAAdapter(BaseAdapter):
         out_features: int,
         whiten: bool = False,
         seed: Optional[int] = 42,
-        normalize: bool = False
+        normalize: bool = True
     ):
         self.pca = PCA(
             n_components=out_features,
@@ -36,9 +37,10 @@ class PCAAdapter(BaseAdapter):
     def __call__(self, features: np.ndarray, **kwargs) -> np.ndarray:
         return self.forward(features)
 
-    def fit(self, X: np.ndarray, y = None) -> None:
+    def fit(self, X: np.ndarray, y = None) -> "PCAAdapter":
         self.pca.fit(X)
         self._is_fitted = True
+        return self
 
     @classmethod
     def from_pretrained(cls, pretrained_path: str) -> "PCAAdapter":
@@ -51,3 +53,14 @@ class PCAAdapter(BaseAdapter):
     def save_as_pretrained(self, save_path: str) -> None:
         with open(save_path, "wb") as f:
             pickle.dump(self, f)
+
+    @classmethod
+    def from_config(cls, config: FeatureAdapterConfig) -> "PCAAdapter":
+        init_kwargs = {
+            "out_features": config.out_features,
+            "whiten": config.whiten,
+            "normalize": config.output_l2_norm,
+            "seed": config.seed
+        }
+        init_kwargs = {k: v for k, v in init_kwargs if v is not None or k == "seed"}
+        return cls(**init_kwargs)
