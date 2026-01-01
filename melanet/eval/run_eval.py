@@ -90,6 +90,24 @@ class EvaluateArguments:
         default=None,
         metadata={"help": "Used for configuring zero-shot process."}
     )
+    feature_adapter: Optional[Literal["pca", "linear", "fusion"]] = field(
+        default=None,
+        metadata={"help": (
+            "Create adapter that will be used for transforming extracted features. Possible options:"
+            " - 'pca': Initialize PCA adapter that will select N components (lower dimension)"
+            " - 'linear': Initialize simple linear projection layer that will simply transform embedding of one size to another"
+            " - 'fusion': Initialize MLP that will combine embeddings from 2 models into single representation"
+            )
+        }
+    )
+    feature_adapter_path: Optional[str] = field(
+        default=None,
+        metadata={"help": "Provide path from or where feature adapter will be loaded and/or saved."}
+    )
+    feature_adapter_config: Optional[str] = field(
+        default=None,
+        metadata={"help": "Used for configuring adapters."}
+    )
     vector_store_config: Optional[str] = field(
         default=None,
         metadata={"help": "Used for configuring vector stores."}

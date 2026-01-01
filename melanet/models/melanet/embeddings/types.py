@@ -49,7 +49,14 @@ class FeatureExtractorOutput:
             return self.zero_shot_embeddings
         else:
             raise ValueError("Output has no embeddings")
-    
+
+    def l2_normalize(self) -> "FeatureExtractorOutput":
+        if self.have_ft_embeddings():
+            self.ft_embeddings = normalize_embeddings(self.ft_embeddings)
+        if self.have_zero_shot_embeddings():
+            self.zero_shot_embeddings = normalize_embeddings(self.zero_shot_embeddings)
+        return self
+
     def to_dict(self) -> dict[str, Optional[np.ndarray]]:
         _obj_dict = {}
         _obj_dict["ft_embeddings"] = tensor2numpy(self.ft_embeddings) if self.have_ft_embeddings() else None

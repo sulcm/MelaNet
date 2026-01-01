@@ -4,9 +4,7 @@ import numpy as np
 from typing import Optional
 from collections import OrderedDict
 
-from sklearn.decomposition import PCA
-
-from ..embeddings.utils import normalize_embeddings
+from ..adapters import PCAAdapter
 
 
 class NNClassifier():
@@ -18,21 +16,17 @@ class NNClassifier():
             metric: 'l2' for Euclidean or 'ip' for inner product (cosine similarity if normalized).
         """
         self.metric = metric
-        self.pca: PCA = None
+        self.pca: Optional[PCAAdapter] = None
 
         self.idx2cls = cls_ids
         self.index = self._build_index(embeddings, metric, pca_components=pca_components)
 
-    def _pca(self, embeds: np.ndarray) -> np.ndarray:
-        pca_embeds = self.pca.transform(embeds)
-        return normalize_embeddings(pca_embeds)
-
     def _build_index(self, embs: np.ndarray, metric: str, pca_components: Optional[int] = None):
         if pca_components is not None:
-            self.pca = PCA(n_components=pca_components, whiten=True)
+            self.pca = PCAAdapter(out_features=pca_components, whiten=True, normalize=True)
             self.pca = self.pca.fit(embs)
         if self.pca is not None:
-            embs = self._pca(embs)
+            embs = self.pca(embs)
 
         if metric == "l2":
             index = faiss.IndexFlatL2(embs.shape[1])
@@ -56,7 +50,7 @@ class NNClassifier():
             List of lists of tuples [(class, distance), ...] per query
         """
         if self.pca is not None:
-            query_embeddings = self._pca(query_embeddings)
+            query_embeddings = self.pca(query_embeddings)
         distances, indices = self.index.search(query_embeddings, 1 if top_k == 1 else search_k)
 
         results = []
