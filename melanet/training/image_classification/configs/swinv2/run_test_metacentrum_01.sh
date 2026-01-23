@@ -1,24 +1,31 @@
 python run_image_classification.py \
     --model_name_or_path timm/swinv2_base_window12to24_192to384.ms_in22k_ft_in1k \
     --ignore_mismatched_sizes True \
-    --dataset_name metacentrum_scratch/SpilledMILK10k \
+    --dataset_name metacentrum_scratch/AugmentedMILK10k \
     --image_column_name image \
     --label_column_name label \
     --classification_task multiclass \
     --remove_unused_columns False \
     --output_dir /storage/plzen4-ntis/home/sulcm01/outputs/swinv2_base/melanet_swinv2_base_debug \
     --overwrite_output_dir \
-    --num_train_epochs 30 \
+    --num_train_epochs 1 \
     --learning_rate 5e-4 \
+    --weight_decay 1e-5 \
     --lr_scheduler_type cosine \
     --warmup_ratio 0.05 \
-    --per_device_train_batch_size 64 \
+    --per_device_train_batch_size 16 \
     --per_device_eval_batch_size 32 \
-    --gradient_accumulation_steps 1 \
+    --gradient_accumulation_steps 4 \
+    --apply_augmentations_prob 0.5 \
+    --apply_mixup_cutmix_prob 0.5 \
+    --final_dropout 0.3 \
+    --hidden_dropout 0.1 \
+    --attention_dropout 0.1 \
+    --drop_path_rate 0.1 \
     --logging_strategy steps \
-    --logging_steps 100 \
+    --logging_steps 5 \
     --eval_strategy steps \
-    --eval_steps 1000 \
+    --eval_steps 10 \
     --save_strategy steps \
     --save_steps 5000 \
     --save_total_limit 2 \
@@ -28,6 +35,6 @@ python run_image_classification.py \
     --do_train \
     --do_eval \
     --fp16 \
-    --report_to wandb \
+    --report_to none \
     --dataloader_num_workers 4 \
     --seed 42

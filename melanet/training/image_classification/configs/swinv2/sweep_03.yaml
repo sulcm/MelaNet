@@ -1,4 +1,4 @@
-name: Sweep-SWIN-v2-CE-Regularization-Aug
+name: Sweep-Swin-v2-CE-Regularization-Aug
 description: "Swin Transformer v2 Base training with CE loss, regularization parameters set, and offline augmented dataset with online augmentations during training"
 method: bayes
 metric:
@@ -49,12 +49,12 @@ parameters:
   report_to:
     value: "wandb"
   dataloader_num_workers:
-    value: 4
+    value: 8
   seed:
     value: 42
   # Hyperparameters:
   num_train_epochs:
-    value: 50
+    value: 30
   learning_rate:
     min: 1e-5
     max: 1e-2
@@ -92,9 +92,9 @@ parameters:
   warmup_ratio:
     value: 0.05
   per_device_train_batch_size:
-    values: [32, 64]
+    values: [8, 16]
   gradient_accumulation_steps:
-    value: 1
+    value: 4
   per_device_eval_batch_size:
     value: 32
   eval_strategy:
