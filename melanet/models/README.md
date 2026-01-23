@@ -10,9 +10,10 @@
 - [EfficientNet](https://huggingface.co/timm/tf_efficientnetv2_m.in21k_ft_in1k)
 - [CAFormer](https://huggingface.co/timm/caformer_s18.sail_in1k_384)
 
-### ViTs
+### Transformers
 - [ViT-B/16](https://huggingface.co/timm/vit_base_patch16_384.orig_in21k_ft_in1k)
 - ViT with CNN backbone: [Google Hybrid CNN-ViT](https://huggingface.co/google/vit-hybrid-base-bit-384)
+- [Swin Transformer V2](https://huggingface.co/timm/swinv2_base_window12to24_192to384.ms_in22k_ft_in1k)
 
 ---
 
