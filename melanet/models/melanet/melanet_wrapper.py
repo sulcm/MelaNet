@@ -46,6 +46,15 @@ class MelaNet():
             self.model = AutoModelForImageClassification.from_pretrained(model_name)
             self.model.eval().to(self.device)
 
+    def get_labels(self) -> Optional[list[str]]:
+        if self.is_feature_extractor:
+            return None
+        else:
+            # Each model initialized from `AutoModelForImageClassification` has config `PreTrainedConfig` with `label2id` attribute
+            return list(
+                self.model.config.label2id.keys()
+            )
+
     @property
     def feature_extractor_config(self) -> Optional[FeatureExtractorConfig]:
         if self.is_feature_extractor:
