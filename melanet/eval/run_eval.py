@@ -26,6 +26,7 @@ from torchmetrics import (
 )
 
 from melanet.melanet_wrapper import MelaNet, FeatureExtractorConfig, ZeroShotConfig
+from melanet.cache import CacheManager
 from melanet.embeddings.types import MELANET_FEATURES_PREFIX
 from melanet.vectorstores import VectorStoreConfig, create_default_vector_store_config, MultiNNClassifier, NNClassifier
 from melanet.vectorstores.rrf import melanet_rrf
@@ -62,6 +63,10 @@ class EvaluateArguments:
     zero_shot_model_name_or_path: Optional[str] = field(
         default=None,
         metadata={"help": "Path to pre-trained zero-shot model or model identifier from huggingface.co/models. Only used when `feature_classification` is active."},
+    )
+    cache_model_inference: Optional[str] = field(
+        default=None,
+        metadata={"help": "Provide path where to store / cache infered values from model."},
     )
     isic_submission_path: Optional[str] = field(
         default=None,
@@ -322,7 +327,25 @@ def classifier_predict(model: MelaNet, dataset: Dataset, eval_args: EvaluateArgu
         return batch
 
     dataset = dataset.map(map_eval, batched=True, batch_size=eval_args.batch_size, desc="Evaluating model", load_from_cache_file=False)
-    predictions = np.argmax(dataset["predictions"], axis=-1)
+    logits = np.array(dataset["predictions"])
+
+    if eval_args.cache_model_inference:
+        CacheManager.save(
+            path=eval_args.cache_model_inference,
+            cache={
+                "logits": logits
+            },
+            metadata={
+                "eval_dataset": {
+                    "name": eval_args.dataset_name,
+                    "split": eval_args.eval_split,
+                    "size": None
+                },
+                "model": eval_args.model_name_or_path
+            }
+        )
+
+    predictions = np.argmax(logits, axis=-1)
     return predictions.tolist()
 
 
@@ -348,6 +371,41 @@ def feature_extraction_predict(model: MelaNet, index: Dataset, dataset: Dataset,
 
     features_columns = [col for col in index.column_names if col.startswith(MELANET_FEATURES_PREFIX)]
     assert features_columns, "Can not find extracted features"
+
+    if eval_args.cache_model_inference:
+        CacheManager.save(
+            path=eval_args.cache_model_inference,
+            cache={
+                "index": {
+                    ft_col: list(index[ft_col])
+                    for ft_col in features_columns
+                },
+                "eval_dataset": {
+                    ft_col: list(dataset[ft_col])
+                    for ft_col in features_columns
+                },
+            },
+            metadata={
+                "datasets": {
+                    "index": {
+                        "name": eval_args.index_name,
+                        "split": eval_args.index_split,
+                        "size": eval_args.index_size
+                    },
+                    "eval_dataset": {
+                        "name": eval_args.dataset_name,
+                        "split": eval_args.eval_split,
+                        "size": None
+                    }
+                },
+                "models": {
+                    "ft_model": eval_args.model_name_or_path,
+                    "zero_shot_model": eval_args.model_name_or_path,
+                    "feature_extractor_config": model.feature_extractor_config.model_dump(),
+                    "zero_shot_config": model.zero_shot_config.model_dump()
+                }
+            }
+        )
 
     vector_store_config = VectorStoreConfig.from_cli(eval_args.vector_store_config) if eval_args.vector_store_config is not None else create_default_vector_store_config()
     if len(features_columns) > 1:
