@@ -1,12 +1,20 @@
 import os
 import torch
 import traceback
+import numpy as np
 
-from typing import TypeVar, Generic, Optional, Union, Any
+from typing import TypeVar, Generic, Optional, Union, Any, TypedDict
 from dataclasses import dataclass
 
 
 T = TypeVar("T")
+
+class ClassifierCache(TypedDict):
+    logits: np.ndarray
+
+class FeatureExtractorCache(TypedDict):
+    index: dict[str, torch.Tensor]
+    eval_dataset: dict[str, torch.Tensor]
 
 
 @dataclass

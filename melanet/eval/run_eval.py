@@ -26,7 +26,7 @@ from torchmetrics import (
 )
 
 from melanet.melanet_wrapper import MelaNet, FeatureExtractorConfig, ZeroShotConfig
-from melanet.cache import CacheManager
+from melanet.cache import CacheManager, ClassifierCache, FeatureExtractorCache
 from melanet.embeddings.types import MELANET_FEATURES_PREFIX
 from melanet.vectorstores import VectorStoreConfig, create_default_vector_store_config, MultiNNClassifier, NNClassifier
 from melanet.vectorstores.rrf import melanet_rrf
@@ -63,6 +63,10 @@ class EvaluateArguments:
     zero_shot_model_name_or_path: Optional[str] = field(
         default=None,
         metadata={"help": "Path to pre-trained zero-shot model or model identifier from huggingface.co/models. Only used when `feature_classification` is active."},
+    )
+    load_cached_model_inference: Optional[str] = field(
+        default=None,
+        metadata={"help": "Provide path from where to load cached infered values from model."},
     )
     cache_model_inference: Optional[str] = field(
         default=None,
@@ -326,24 +330,30 @@ def classifier_predict(model: MelaNet, dataset: Dataset, eval_args: EvaluateArgu
             )
         return batch
 
-    dataset = dataset.map(map_eval, batched=True, batch_size=eval_args.batch_size, desc="Evaluating model", load_from_cache_file=False)
-    logits = np.array(dataset["predictions"])
-
-    if eval_args.cache_model_inference:
-        CacheManager.save(
-            path=eval_args.cache_model_inference,
-            cache={
-                "logits": logits
-            },
-            metadata={
-                "eval_dataset": {
-                    "name": eval_args.dataset_name,
-                    "split": eval_args.eval_split,
-                    "size": None
-                },
-                "model": eval_args.model_name_or_path
-            }
+    if eval_args.load_cached_model_inference and os.path.isfile(eval_args.load_cached_model_inference):
+        cached_values = CacheManager[ClassifierCache].load(
+            path=eval_args.load_cached_model_inference
         )
+        logits = cached_values.cache["logits"]
+    else:
+        dataset = dataset.map(map_eval, batched=True, batch_size=eval_args.batch_size, desc="Evaluating model", load_from_cache_file=False)
+        logits = np.array(dataset["predictions"])
+
+        if eval_args.cache_model_inference:
+            CacheManager.save(
+                path=eval_args.cache_model_inference,
+                cache={
+                    "logits": logits
+                },
+                metadata={
+                    "eval_dataset": {
+                        "name": eval_args.dataset_name,
+                        "split": eval_args.eval_split,
+                        "size": None
+                    },
+                    "model": eval_args.model_name_or_path
+                }
+            )
 
     predictions = np.argmax(logits, axis=-1)
     return predictions.tolist()
@@ -366,46 +376,55 @@ def feature_extraction_predict(model: MelaNet, index: Dataset, dataset: Dataset,
             batch[MELANET_FEATURES_PREFIX + "_embeddings"] = features
         return batch
 
-    index = index.map(map_feature_extraction, batched=True, batch_size=eval_args.batch_size, desc="Extractiong features for index", load_from_cache_file=False)
-    dataset = dataset.map(map_feature_extraction, batched=True, batch_size=eval_args.batch_size, desc="Extractiong features for eval dataset", load_from_cache_file=False)
+    if eval_args.load_cached_model_inference and os.path.isfile(eval_args.load_cached_model_inference):
+        cached_values = CacheManager[FeatureExtractorCache].load(
+            path=eval_args.load_cached_model_inference
+        )
+        features_columns = list(cached_values.cache["index"].keys())
+        for ft_col in features_columns:
+            index = index.add_column(ft_col, cached_values.cache["index"][ft_col])
+            dataset = dataset.add_column(ft_col, cached_values.cache["eval_dataset"][ft_col])
+    else:
+        index = index.map(map_feature_extraction, batched=True, batch_size=eval_args.batch_size, desc="Extractiong features for index", load_from_cache_file=False)
+        dataset = dataset.map(map_feature_extraction, batched=True, batch_size=eval_args.batch_size, desc="Extractiong features for eval dataset", load_from_cache_file=False)
 
-    features_columns = [col for col in index.column_names if col.startswith(MELANET_FEATURES_PREFIX)]
-    assert features_columns, "Can not find extracted features"
+        features_columns = [col for col in index.column_names if col.startswith(MELANET_FEATURES_PREFIX)]
+        assert features_columns, "Can not find extracted features"
 
-    if eval_args.cache_model_inference:
-        CacheManager.save(
-            path=eval_args.cache_model_inference,
-            cache={
-                "index": {
-                    ft_col: list(index[ft_col])
-                    for ft_col in features_columns
-                },
-                "eval_dataset": {
-                    ft_col: list(dataset[ft_col])
-                    for ft_col in features_columns
-                },
-            },
-            metadata={
-                "datasets": {
+        if eval_args.cache_model_inference:
+            CacheManager.save(
+                path=eval_args.cache_model_inference,
+                cache={
                     "index": {
-                        "name": eval_args.index_name,
-                        "split": eval_args.index_split,
-                        "size": eval_args.index_size
+                        ft_col: torch.stack(index[ft_col])
+                        for ft_col in features_columns
                     },
                     "eval_dataset": {
-                        "name": eval_args.dataset_name,
-                        "split": eval_args.eval_split,
-                        "size": None
-                    }
+                        ft_col: torch.stack(dataset[ft_col])
+                        for ft_col in features_columns
+                    },
                 },
-                "models": {
-                    "ft_model": eval_args.model_name_or_path,
-                    "zero_shot_model": eval_args.model_name_or_path,
-                    "feature_extractor_config": model.feature_extractor_config.model_dump(),
-                    "zero_shot_config": model.zero_shot_config.model_dump()
+                metadata={
+                    "datasets": {
+                        "index": {
+                            "name": eval_args.index_name,
+                            "split": eval_args.index_split,
+                            "size": eval_args.index_size
+                        },
+                        "eval_dataset": {
+                            "name": eval_args.dataset_name,
+                            "split": eval_args.eval_split,
+                            "size": None
+                        }
+                    },
+                    "models": {
+                        "ft_model": eval_args.model_name_or_path,
+                        "zero_shot_model": eval_args.model_name_or_path,
+                        "feature_extractor_config": model.feature_extractor_config.model_dump(),
+                        "zero_shot_config": model.zero_shot_config.model_dump()
+                    }
                 }
-            }
-        )
+            )
 
     vector_store_config = VectorStoreConfig.from_cli(eval_args.vector_store_config) if eval_args.vector_store_config is not None else create_default_vector_store_config()
     if len(features_columns) > 1:
