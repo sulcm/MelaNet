@@ -30,7 +30,7 @@ from melanet.cache import CacheManager, ClassifierCache, FeatureExtractorCache
 from melanet.embeddings.types import MELANET_FEATURES_PREFIX
 from melanet.vectorstores import VectorStoreConfig, create_default_vector_store_config, MultiNNClassifier, NNClassifier
 from melanet.vectorstores.rrf import melanet_rrf
-from melanet.utils import tensor2value
+from melanet.utils import tensor2value, kwargs2cli
 from formatter.isic import format_isic_submission
 from metacentrum_utils import DATASET_SCRATCH_PREFIX, load_dataset_from_scratch
 
@@ -351,7 +351,9 @@ def classifier_predict(model: MelaNet, dataset: Dataset, eval_args: EvaluateArgu
                         "split": eval_args.eval_split,
                         "size": None
                     },
-                    "model": eval_args.model_name_or_path
+                    "model": eval_args.model_name_or_path,
+                    "classification_task": eval_args.classification_task,
+                    "is_feature_extractor": eval_args.eval_as_feature_extraction,
                 }
             )
 
@@ -420,8 +422,10 @@ def feature_extraction_predict(model: MelaNet, index: Dataset, dataset: Dataset,
                     "models": {
                         "ft_model": eval_args.model_name_or_path,
                         "zero_shot_model": eval_args.model_name_or_path,
-                        "feature_extractor_config": model.feature_extractor_config.model_dump(),
-                        "zero_shot_config": model.zero_shot_config.model_dump()
+                        "feature_extractor_config": kwargs2cli(**model.feature_extractor_config.model_dump()),
+                        "zero_shot_config": kwargs2cli(**model.zero_shot_config.model_dump()),
+                        "classification_task": eval_args.classification_task,
+                        "is_feature_extractor": eval_args.eval_as_feature_extraction,
                     }
                 }
             )

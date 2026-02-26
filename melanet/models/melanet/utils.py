@@ -26,3 +26,11 @@ def resolve_device(device: Union[str, torch.device] = "cuda") -> torch.device:
     else:
         pass
     return device
+
+
+def kwargs2cli(**kwargs) -> str:
+    cli_args = [
+        f"{key_args}={value_arg}"
+        for key_args, value_arg in kwargs.items()
+    ]
+    return ",".join(cli_args) if cli_args else ""
