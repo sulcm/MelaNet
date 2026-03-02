@@ -2,9 +2,18 @@
 
 ---
 
-Evaluation script for MelaNet that supports fine-tuned classifiers and feature extractors.
+Evaluation script for **MelaNet** that supports fine-tuned classifiers and feature extractors.
 
 For configuartion help run:
 ```bash
 python run_eval.py --help
+```
+
+---
+
+Prepared run scripts are in `melanet/eval/scripts/*.sh` \
+To run them make sure you are in parent directory i.e. `melanet/eval` \
+Then create run by
+```bash
+bash scripts/*.sh
 ```

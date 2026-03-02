@@ -1,0 +1,13 @@
+python run_eval.py \
+    --classification_task "multiclass" \
+    --eval_as_feature_extraction True \
+    --model_name_or_path "/home/sulcm/models/melanet/caformer_s18/melanet_caformer_s18_ce_reg_aug-y7h03asy" \
+    --dataset_name "/home/sulcm/datasets/milk10k/TestMILK10k" \
+    --eval_split "test" \
+    --index_name "/home/sulcm/datasets/milk10k/SpilledMILK10k" \
+    --index_split "train+validation" \
+    --label_column_name "label" \
+    --results_path "./outputs/intermediate.json" \
+    --batch_size 128 \
+    --id_column_name "lesion_id" \
+    --isic_submission_path "./outputs/caformer_s18_y7h03asy_zero_shot_baseline.csv"
