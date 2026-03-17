@@ -1,5 +1,5 @@
-name: Sweep-Grid-Swin-v2
-description: "Swin Transformer v2 Base grid search sweep training"
+name: Sweep-Grid-GoogleHybridViT
+description: "GoogleHybridViT grid search sweep training"
 method: grid
 metric:
   goal: minimize
@@ -7,7 +7,7 @@ metric:
 parameters:
   # Model:
   model_name_or_path:
-    value: "timm/swinv2_base_window12to24_192to384.ms_in22k_ft_in1k"
+    value: "/storage/plzen4-ntis/home/sulcm01/outputs/google_hybrid_vit/base"
   ignore_mismatched_sizes:
     value: True
   fp16:
@@ -25,7 +25,7 @@ parameters:
   classification_task:
     value: "multiclass"
   output_dir:
-    value: "/storage/plzen4-ntis/home/sulcm01/outputs/swinv2_base/melanet_swinv2_base_grid"
+    value: "/storage/plzen4-ntis/home/sulcm01/outputs/google_hybrid_vit/melanet_hvit_grid"
   overwrite_output_dir:
     value: True
   save_steps:
@@ -65,8 +65,6 @@ parameters:
     value: 0.75
   weight_decay:
     value: 1e-5
-  final_dropout:
-    value: 0.2
   hidden_dropout:
     value: 0.1
   drop_path_rate:
@@ -76,11 +74,11 @@ parameters:
   warmup_ratio:
     value: 0.05
   per_device_train_batch_size:
-    values: [8, 16]
+    values: [32, 64]
   gradient_accumulation_steps:
-    value: 4
+    value: 1
   per_device_eval_batch_size:
-    value: 32
+    value: 64
   eval_strategy:
     value: "steps"
   eval_steps:
