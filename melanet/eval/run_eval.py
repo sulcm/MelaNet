@@ -30,6 +30,7 @@ from melanet.cache import CacheManager, ClassifierCache, FeatureExtractorCache
 from melanet.embeddings.types import MELANET_FEATURES_PREFIX
 from melanet.vectorstores import VectorStoreConfig, create_default_vector_store_config, MultiNNClassifier, NNClassifier
 from melanet.vectorstores.rrf import melanet_rrf
+from melanet.functional.softmax import softmax
 from melanet.utils import tensor2value, kwargs2cli
 from formatter.isic import format_isic_submission
 from metacentrum_utils import DATASET_SCRATCH_PREFIX, load_dataset_from_scratch
@@ -357,7 +358,8 @@ def classifier_predict(model: MelaNet, dataset: Dataset, eval_args: EvaluateArgu
                 }
             )
 
-    predictions = np.argmax(logits, axis=-1)
+    probs = softmax(logits, axis=-1)
+    predictions = np.argmax(probs, axis=-1)
     return predictions.tolist()
 
 
