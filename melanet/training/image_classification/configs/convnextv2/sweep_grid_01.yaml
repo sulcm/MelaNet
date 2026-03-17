@@ -1,0 +1,87 @@
+name: Sweep-Grid-ConvNeXt-v2
+description: "ConvNeXt-V2 grid search sweep training"
+method: grid
+metric:
+  goal: minimize
+  name: eval/loss
+parameters:
+  # Model:
+  model_name_or_path:
+    value: "timm/convnextv2_base.fcmae_ft_in22k_in1k_384"
+  ignore_mismatched_sizes:
+    value: True
+  fp16:
+    value: True
+  # Dataset:
+  dataset_name:
+    value: "metacentrum_scratch/SpilledMILK10k"
+  image_column_name:
+    value: "image"
+  label_column_name:
+    value: "label"
+  remove_unused_columns:
+    value: False
+  # Training:
+  classification_task:
+    value: "multiclass"
+  output_dir:
+    value: "/storage/plzen4-ntis/home/sulcm01/outputs/convnext_v2/melanet_convnext_v2_grid"
+  overwrite_output_dir:
+    value: True
+  save_steps:
+    value: 5000
+  save_total_limit:
+    value: 2
+  load_best_model_at_end:
+    value: True
+  metric_for_best_model:
+    value: "eval_loss"
+  greater_is_better:
+    value: False
+  logging_strategy:
+    value: "steps"
+  logging_steps:
+    value: 100
+  do_train:
+    value: True
+  do_eval:
+    value: True
+  report_to:
+    value: "wandb"
+  dataloader_num_workers:
+    value: 8
+  seed:
+    value: 42
+  # Hyperparameters:
+  num_train_epochs:
+    values: [30, 50]
+  optim:
+    values: ["adamw_torch", "sgd"]
+  optim_specific_args:
+    value: "{\"sgd\": \"momentum=0.9,nesterov=True\"}"
+  learning_rate:
+    values: [1e-6, 1e-5, 1e-4, 1e-3]
+  apply_augmentations_prob:
+    value: 0.75
+  weight_decay:
+    value: 1e-5
+  final_dropout:
+    value: 0.2
+  drop_path_rate:
+    value: 0.1
+  lr_scheduler_type:
+    value: "cosine"
+  warmup_ratio:
+    value: 0.05
+  per_device_train_batch_size:
+    values: [32, 64]
+  gradient_accumulation_steps:
+    value: 1
+  per_device_eval_batch_size:
+    value: 64
+  eval_strategy:
+    value: "steps"
+  eval_steps:
+    value: 1000
+  save_strategy:
+    value: "steps"

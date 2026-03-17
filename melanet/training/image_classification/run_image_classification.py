@@ -9,7 +9,9 @@ Modified version of file located at: https://github.com/huggingface/transformers
 
 import os
 import sys
+import json
 import logging
+import traceback
 import random
 import torch
 import transformers
@@ -261,6 +263,15 @@ class AuxiliaryArguments:
                 "Apply randomly chosen MixUp or CutMix augmentation on-the-fly using `torchvision.transforms` on samples in batch with given probability."
                 " Be aware that those augmentations also modify the labels and returns soft labels e.i. [N,] -> [N, C]."
                 " Make sure that used loss functions support soft labels as targets."
+            )
+        }
+    )
+    optim_specific_args: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": (
+                'Optimazer specific arguments in JSON structure, like: `"{\"adamw_torch\": null, \"sgd\": \"momentum=0.9,nesterov=True\"}"`.'
+                ' Usefull when running sweeps. Escape double quotes using `\\`. Will be applied only if `TrainingArguments.optim_args` is None.'
             )
         }
     )
@@ -827,9 +838,25 @@ def main(args: Optional[dict[str, Any]] = None):
         dataset["validation"].set_transform(val_transforms)
 
     # Setup custom optimizer with kwargs
-    if TrainingArguments.default_optim != training_args.optim and training_args.optim_args is not None:
+    if TrainingArguments.default_optim != training_args.optim or aux_args.optim_specific_args is not None:
         optim, base_optim_kwargs = Trainer.get_optimizer_cls_and_kwargs(training_args, model)
-        passed_optim_kwargs = parse_kwargs_from_cli(training_args.optim_args, optim)
+
+        if training_args.optim_args is not None:
+            passed_optim_kwargs = parse_kwargs_from_cli(training_args.optim_args, optim)
+        elif aux_args.optim_specific_args is not None:
+            try:
+                _optim_specific_args = json.loads(aux_args.optim_specific_args)
+            except Exception:
+                logger.warning(f"Invalid JSON in `optim_specific_args`.\n{traceback.format_exc()}")
+                _optim_specific_args = {}
+            if training_args.optim in _optim_specific_args:
+                training_args.optim_args = _optim_specific_args[training_args.optim]
+                passed_optim_kwargs = parse_kwargs_from_cli(_optim_specific_args[training_args.optim], optim)
+            else:
+               passed_optim_kwargs = {} 
+        else:
+            passed_optim_kwargs = {}
+
         optim_kwargs = {
             **base_optim_kwargs,
             **passed_optim_kwargs
@@ -872,7 +899,7 @@ def main(args: Optional[dict[str, Any]] = None):
                 for image in images
             ])
 
-        if random.random() <= apply_mixup_cutmix_prob:
+        if apply_mixup_cutmix_prob > 0.0 and random.random() <= apply_mixup_cutmix_prob:
             images, labels = mixup_or_cutmix(images, labels)
 
         return images, labels
