@@ -18,15 +18,8 @@
 ---
 
 ## Image Classification (Zero-Shot)
-
-### OpenCLIP
-- [BioCLIP](https://huggingface.co/imageomics/bioclip-2)
-
-### timm
-- TBD
-
-### HuggingFace
-- TBD
+- [DINOv3](https://huggingface.co/timm/vit_7b_patch16_dinov3.lvd1689m)
+- [BiomedCLIP](https://huggingface.co/microsoft/BiomedCLIP-PubMedBERT_256-vit_base_patch16_224)
 
 ---
 

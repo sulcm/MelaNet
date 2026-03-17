@@ -1,0 +1,14 @@
+python run_eval.py \
+    --classification_task "multiclass" \
+    --eval_as_feature_extraction True \
+    --zero_shot_model_name_or_path "hf-hub:microsoft/BiomedCLIP-PubMedBERT_256-vit_base_patch16_224" \
+    --zero_shot_config "model_backend=open_clip" \
+    --dataset_name "metacentrum_scratch/TestMILK10k" \
+    --eval_split "test" \
+    --index_name "metacentrum_scratch/SpilledMILK10k" \
+    --index_split "train+validation" \
+    --label_column_name "label" \
+    --results_path "./outputs/intermediate.json" \
+    --batch_size 128 \
+    --id_column_name "lesion_id" \
+    --isic_submission_path "./outputs/biomedclip_zero_shot_test.csv"
