@@ -41,7 +41,7 @@ parameters:
   logging_strategy:
     value: "steps"
   logging_steps:
-    value: 100
+    value: 200
   do_train:
     value: True
   do_eval:
@@ -80,6 +80,6 @@ parameters:
   eval_strategy:
     value: "steps"
   eval_steps:
-    value: 1000
+    value: 2500
   save_strategy:
     value: "steps"
