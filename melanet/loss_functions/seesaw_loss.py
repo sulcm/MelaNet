@@ -59,7 +59,7 @@ class SeesawLoss(nn.Module):
 
         if label_weights is not None and isinstance(label_weights, (list, tuple)):
             assert len(label_weights) == num_classes, "Size on `label_weights` do not match the number of classes"
-            self.label_weights = torch.tensor(label_weights)
+            self.label_weights = torch.tensor(label_weights, device=device)
         else:
             self.label_weights = None
 
@@ -98,7 +98,7 @@ class SeesawLoss(nn.Module):
         if targets.dim() == 2:
             assert targets.size(1) == C, "soft targets must have shape [N, num_classes]"
             # Some operations need hard indices so index of dominant class is used
-            hard_indices = torch.argmax(targets, dim=1)
+            hard_indices = torch.argmax(targets, dim=1).long()
         else:
             hard_indices = targets.long()
 
@@ -113,7 +113,7 @@ class SeesawLoss(nn.Module):
             if self.mask_mode:
                 # Apply mitigation only when ratio < 1 (tail vs head)
                 index = (ratio_matrix < 1.0).float()
-                sample_weights = torch.pow(ratio_matrix, self.p) * index + (1 - index)
+                sample_weights = torch.pow(ratio_matrix, self.p) * index + (1.0 - index)
             else:
                 # Always apply mitigation smoothly
                 sample_weights = torch.pow(torch.clamp(ratio_matrix, max=1.0), self.p)
@@ -130,13 +130,14 @@ class SeesawLoss(nn.Module):
             if self.mask_mode:
                 # Only apply compensation when prob_j > prob_i
                 index = (score_matrix > 1.0).float()
-                compensation_factor = torch.pow(score_matrix, self.q) * index + (1 - index)
+                compensation_factor = torch.pow(score_matrix, self.q) * index + (1.0 - index)
             else:
                 compensation_factor = torch.pow(torch.clamp(score_matrix, min=1.0), self.q)
 
             seesaw_weights *= compensation_factor
 
         # --- 3. Adjust logits ---
+        seesaw_weights = seesaw_weights.clamp(min=self.eps)
         if self.keep_target_logits:
             # Only adjust non-target class logits
             one_hot = F.one_hot(hard_indices, num_classes=C).float()
