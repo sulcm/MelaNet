@@ -1,7 +1,9 @@
 import os
+import sys
 import json
 import logging
 import numpy as np
+import pandas as pd
 
 import torch
 import torch.nn.functional as F
@@ -25,18 +27,27 @@ from torchmetrics import (
     NegativePredictiveValue
 )
 
-from melanet.melanet_wrapper import MelaNet, FeatureExtractorConfig, ZeroShotConfig
+from melanet.melanet_wrapper import MelaNet, FeatureExtractorConfig, ZeroShotConfig, FeatureExtractorOutput
 from melanet.cache import CacheManager, ClassifierCache, FeatureExtractorCache
 from melanet.embeddings.types import MELANET_FEATURES_PREFIX
 from melanet.vectorstores import VectorStoreConfig, create_default_vector_store_config, MultiNNClassifier, NNClassifier
-from melanet.vectorstores.rrf import melanet_rrf
+from melanet.vectorstores.rrf import reciprocal_rank_fusion
+from melanet.zero_shot.augmentations import build_view_transformations
 from melanet.functional.softmax import softmax
 from melanet.utils import tensor2value, kwargs2cli
+from melanet.inference import run_inference
 from formatter.isic import format_isic_submission
 from metacentrum_utils import DATASET_SCRATCH_PREFIX, load_dataset_from_scratch
 
 
+# Setup logging
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+logging.basicConfig(
+    format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
+    datefmt="%m/%d/%Y %H:%M:%S",
+    handlers=[logging.StreamHandler(sys.stdout)],
+)
 
 
 @dataclass
@@ -64,6 +75,10 @@ class EvaluateArguments:
     zero_shot_model_name_or_path: Optional[str] = field(
         default=None,
         metadata={"help": "Path to pre-trained zero-shot model or model identifier from huggingface.co/models. Only used when `feature_classification` is active."},
+    )
+    prediction_resolution_strategy: Literal["greedy", "rrf", "first", "last", "mean"] = field(
+        default="greedy",
+        metadata={"help": "Strategy how to resolve predictions that have same ID or when using TTA transform strategies during evaluation."},
     )
     load_cached_model_inference: Optional[str] = field(
         default=None,
@@ -113,6 +128,18 @@ class EvaluateArguments:
         default=None,
         metadata={"help": "Used for configuring zero-shot process."}
     )
+    apply_augmentations: Optional[str] = field(
+        default=None,
+        metadata={"help": "Use augmentations during all phases. Overrides `index_augmentations` and `test_time_augmentations`. Defaults to `None` -> off. Can be 'all' or list of augmentations in format 'augment_1,augment_2,...'."}
+    )
+    index_augmentations: Optional[str] = field(
+        default=None,
+        metadata={"help": "Use augmentations during creation of index. Defaults to `None` -> off. Can be 'all' or list of augmentations in format 'augment_1,augment_2,...'."}
+    )
+    test_time_augmentations: Optional[str] = field(
+        default=None,
+        metadata={"help": "Use augmentations during test time. Defaults to `None` -> off. Can be 'all' or list of augmentations in format 'augment_1,augment_2,...'."}
+    )
     feature_adapter: Optional[Literal["pca", "linear", "fusion"]] = field(
         default=None,
         metadata={"help": (
@@ -160,6 +187,10 @@ class EvaluateArguments:
     device: str = field(
         default="cuda",
         metadata={"help": "Select which device to use for inference."}
+    )
+    num_workers: Optional[int] = field(
+        default=4,
+        metadata={"help": "The number of workers that will be used for loading data."}
     )
     seed: Optional[int] = field(
         default=42,
@@ -293,15 +324,20 @@ def has_ground_truth_labels(dataset: Dataset, eval_args: EvaluateArguments) -> b
     return True if label_column is not None and label_column in dataset.column_names else False
 
 
-def metrics_update_state(predictions, label_ids, metrics: dict[str, Callable], predictions_type: Literal["logits", "probs", "labels"] = "logits"):
+def metrics_update_state(
+    predictions,
+    label_ids,
+    metrics: dict[str, Callable],
+    classification_task: Literal["binary", "multiclass", "multilabel"],
+    predictions_type: Literal["logits", "probs", "labels"] = "logits"
+) -> None:
     """Computes accuracy on a batch of predictions"""
     target = torch.tensor(label_ids)
     t_predictions = torch.tensor(predictions)
     if predictions_type == "logits":
-        probs = F.softmax(t_predictions, dim=-1)
-        preds = probs.argmax(dim=-1)
+        preds = F.softmax(t_predictions, dim=-1) if classification_task == "multiclass" else F.sigmoid(t_predictions)
     elif predictions_type == "probs":
-        preds = t_predictions.argmax(dim=-1)
+        preds = t_predictions
     elif predictions_type == "labels":
         preds = t_predictions
     else:
@@ -314,37 +350,50 @@ def metrics_update_state(predictions, label_ids, metrics: dict[str, Callable], p
         )
 
 
-def classifier_predict(model: MelaNet, dataset: Dataset, eval_args: EvaluateArguments, metrics: Optional[dict] = None) -> list[int]:
-    def map_eval(batch):
-        with torch.no_grad():
-            predictions = model(
-                batch[eval_args.image_column_name],
-                return_logits=True
-            )
-        batch["predictions"] = predictions
-        if metrics is not None:
-            metrics_update_state(
-                predictions=predictions,
-                label_ids=batch[eval_args.label_column_name],
-                metrics=metrics,
-                predictions_type="logits"
-            )
-        return batch
+def get_transforms(load_transforms: str) -> list[Callable[[torch.Tensor], torch.Tensor]]:
+    _transforms_by_name = build_view_transformations()
 
+    if load_transforms == "all":
+        return list(_transforms_by_name.values())
+    else:
+        transform_names = [name.strip() for name in load_transforms.split(",")]
+        return [
+            _transforms_by_name[t_name]
+            for t_name in transform_names
+        ]
+
+
+def classifier_predict(
+    model: MelaNet,
+    dataset: Dataset,
+    eval_args: EvaluateArguments,
+    metrics: Optional[dict] = None,
+    tta_transforms: Optional[list[Callable[[torch.Tensor], torch.Tensor]]] = None
+) -> dict[str, int]:
     if eval_args.load_cached_model_inference and os.path.isfile(eval_args.load_cached_model_inference):
         cached_values = CacheManager[ClassifierCache].load(
             path=eval_args.load_cached_model_inference
         )
-        logits = cached_values.cache["logits"]
+        predictions = cached_values.cache["predictions"]
     else:
-        dataset = dataset.map(map_eval, batched=True, batch_size=eval_args.batch_size, desc="Evaluating model", load_from_cache_file=False)
-        logits = np.array(dataset["predictions"])
+        predictions = run_inference(
+            model=model,
+            dataset=dataset,
+            image_column_name=eval_args.image_column_name,
+            id_column_name=eval_args.id_column_name,
+            model_kwargs={"return_logits": True},
+            batch_size=eval_args.batch_size,
+            transforms=tta_transforms,
+            num_workers=eval_args.num_workers,
+            pin_memory=True,
+            device_type=eval_args.device
+        )
 
         if eval_args.cache_model_inference:
             CacheManager.save(
                 path=eval_args.cache_model_inference,
                 cache={
-                    "logits": logits
+                    "predictions": predictions
                 },
                 metadata={
                     "eval_dataset": {
@@ -358,28 +407,66 @@ def classifier_predict(model: MelaNet, dataset: Dataset, eval_args: EvaluateArgu
                 }
             )
 
-    probs = softmax(logits, axis=-1)
-    predictions = np.argmax(probs, axis=-1)
-    return predictions.tolist()
-
-
-def feature_extraction_predict(model: MelaNet, index: Dataset, dataset: Dataset, eval_args: EvaluateArguments, metrics: Optional[dict] = None) -> list[int]:
-    is_model_output_object = model.feature_extractor_config.output_type == "object"
-
-    def map_feature_extraction(batch):
-        with torch.no_grad():
-            features = model(
-                batch[eval_args.image_column_name]
-            )
-        if is_model_output_object:
-            features = features.to_dict()
-            for feat_name in features.keys():
-                if features[feat_name] is not None:
-                    batch[MELANET_FEATURES_PREFIX + "_" + feat_name] = features[feat_name]
+    final_preds = {}
+    final_probs = {}
+    for lesion_id, pred_logits in predictions.items():
+        pred_probs = softmax(pred_logits, axis=-1)
+        if eval_args.prediction_resolution_strategy == "greedy":
+            sample_type_id, prediction = np.unravel_index(pred_probs.argmax(), pred_probs.shape)
+            _probs = pred_probs[sample_type_id]
+        elif eval_args.prediction_resolution_strategy == "first":
+            prediction = pred_probs[0].argmax()
+            _probs = pred_probs[0]
+        elif eval_args.prediction_resolution_strategy == "last":
+            prediction = pred_probs[-1].argmax()
+            _probs = pred_probs[-1]
+        elif eval_args.prediction_resolution_strategy == "mean":
+            mean_probs = np.mean(pred_probs, axis=0)
+            prediction = mean_probs.argmax()
+            _probs = mean_probs
         else:
-            batch[MELANET_FEATURES_PREFIX + "_embeddings"] = features
-        return batch
+            prediction = -1
+            _probs = np.array([])
+        final_preds[lesion_id] = int(prediction)
+        if metrics is not None:
+            final_probs[lesion_id] = _probs
 
+    if metrics is not None:
+        logger.info("Computing metrics")
+        mapped_labels = pd.DataFrame({
+            eval_args.id_column_name: dataset[eval_args.id_column_name],
+            eval_args.label_column_name: dataset[eval_args.label_column_name],
+        })
+        mapped_labels = mapped_labels.drop_duplicates(eval_args.id_column_name)
+
+        if len(mapped_labels) != len(final_preds):
+            return final_preds
+        mapped_labels["prediction"] = mapped_labels[eval_args.id_column_name].map(final_preds)
+        if mapped_labels["prediction"].hasnans:
+            return final_preds
+        mapped_labels["prediction"] = mapped_labels["prediction"].astype(int)
+        mapped_labels["prob"] = mapped_labels[eval_args.id_column_name].map(final_probs)
+
+        metrics_update_state(
+            predictions=np.asarray(mapped_labels["prob"].to_list()),
+            label_ids=mapped_labels[eval_args.label_column_name].to_list(),
+            metrics=metrics,
+            classification_task=eval_args.classification_task,
+            predictions_type="probs"
+        )
+
+    return final_preds
+
+
+def feature_extraction_predict(
+    model: MelaNet,
+    index: Dataset,
+    dataset: Dataset,
+    eval_args: EvaluateArguments,
+    metrics: Optional[dict] = None,
+    index_transforms: Optional[list[Callable[[torch.Tensor], torch.Tensor]]] = None,
+    tta_transforms: Optional[list[Callable[[torch.Tensor], torch.Tensor]]] = None
+) -> dict[str, int]:
     if eval_args.load_cached_model_inference and os.path.isfile(eval_args.load_cached_model_inference):
         cached_values = CacheManager[FeatureExtractorCache].load(
             path=eval_args.load_cached_model_inference
@@ -389,10 +476,66 @@ def feature_extraction_predict(model: MelaNet, index: Dataset, dataset: Dataset,
             index = index.add_column(ft_col, cached_values.cache["index"][ft_col])
             dataset = dataset.add_column(ft_col, cached_values.cache["eval_dataset"][ft_col])
     else:
-        index = index.map(map_feature_extraction, batched=True, batch_size=eval_args.batch_size, desc="Extractiong features for index", load_from_cache_file=False)
-        dataset = dataset.map(map_feature_extraction, batched=True, batch_size=eval_args.batch_size, desc="Extractiong features for eval dataset", load_from_cache_file=False)
+        index_extracted_features = run_inference(
+            model=model,
+            dataset=index,
+            image_column_name=eval_args.image_column_name,
+            id_column_name=eval_args.id_column_name,
+            batch_size=eval_args.batch_size,
+            transforms=index_transforms,
+            num_workers=eval_args.num_workers,
+            pin_memory=True,
+            device_type=eval_args.device
+        )
+        eval_extracted_features = run_inference(
+            model=model,
+            dataset=dataset,
+            image_column_name=eval_args.image_column_name,
+            id_column_name=eval_args.id_column_name,
+            batch_size=eval_args.batch_size,
+            transforms=tta_transforms,
+            num_workers=eval_args.num_workers,
+            pin_memory=True,
+            device_type=eval_args.device
+        )
 
-        features_columns = [col for col in index.column_names if col.startswith(MELANET_FEATURES_PREFIX)]
+        if model.feature_extractor_config.output_type == "object":
+            index_extracted_features = pd.concat(index_extracted_features.values(), ignore_index=True)
+            eval_extracted_features = pd.concat(eval_extracted_features.values(), ignore_index=True)
+
+            _feature_names = FeatureExtractorOutput.get_feature_names()
+            _to_drop = []
+            _to_rename = []
+            for f_name in _feature_names:
+                if index_extracted_features[f_name].hasnans or eval_extracted_features[f_name].hasnans:
+                    _to_drop.append(f_name)
+                else:
+                    _to_rename.append(f_name)
+
+            if _to_drop:
+                index_extracted_features = index_extracted_features.drop(columns=_to_drop)
+                eval_extracted_features = eval_extracted_features.drop(columns=_to_drop)
+            if _to_rename:
+                index_extracted_features = index_extracted_features.rename(
+                    columns={f_name: f"{MELANET_FEATURES_PREFIX}_{f_name}" for f_name in _to_rename}
+                )
+                eval_extracted_features = eval_extracted_features.rename(
+                    columns={f_name: f"{MELANET_FEATURES_PREFIX}_{f_name}" for f_name in _to_rename}
+                )
+        else:
+            index_extracted_features = pd.Series(
+                index_extracted_features
+            ).explode().reset_index(name=MELANET_FEATURES_PREFIX).rename(columns={"index": eval_args.id_column_name})
+            eval_extracted_features = pd.Series(
+                eval_extracted_features
+            ).explode().reset_index(name=MELANET_FEATURES_PREFIX).rename(columns={"index": eval_args.id_column_name})
+
+        index_extracted_features[eval_args.label_column_name] = index_extracted_features[eval_args.id_column_name].map({
+            id: label
+            for id, label in zip(index[eval_args.id_column_name], index[eval_args.label_column_name])
+        })
+
+        features_columns = [col for col in index_extracted_features.columns if col.startswith(MELANET_FEATURES_PREFIX)]
         assert features_columns, "Can not find extracted features"
 
         if eval_args.cache_model_inference:
@@ -400,11 +543,11 @@ def feature_extraction_predict(model: MelaNet, index: Dataset, dataset: Dataset,
                 path=eval_args.cache_model_inference,
                 cache={
                     "index": {
-                        ft_col: torch.stack(index[ft_col])
+                        ft_col: index_extracted_features[ft_col].to_list()
                         for ft_col in features_columns
                     },
                     "eval_dataset": {
-                        ft_col: torch.stack(dataset[ft_col])
+                        ft_col: eval_extracted_features[ft_col].to_list()
                         for ft_col in features_columns
                     },
                 },
@@ -435,56 +578,115 @@ def feature_extraction_predict(model: MelaNet, index: Dataset, dataset: Dataset,
     vector_store_config = VectorStoreConfig.from_cli(eval_args.vector_store_config) if eval_args.vector_store_config is not None else create_default_vector_store_config()
     if len(features_columns) > 1:
         vector_store = MultiNNClassifier(
-            cls_ids=np.asarray(index[eval_args.label_column_name]),
+            cls_ids=np.asarray(index_extracted_features[eval_args.label_column_name].to_list()),
             embeddings={
-                feat_name: np.asarray(index[feat_name])
+                feat_name: np.asarray(index_extracted_features[feat_name].to_list(), dtype=np.float32).squeeze()
                 for feat_name in features_columns
             },
             metric=vector_store_config.metric,
             pca_components=vector_store_config.pca_components
         )
-
         indexes_preds = vector_store.predict(
             query_embeddings={
-                feat_name: np.asarray(dataset[feat_name])
+                feat_name: np.asarray(eval_extracted_features[feat_name].to_list(), dtype=np.float32).squeeze()
                 for feat_name in features_columns
             },
             top_k=vector_store_config.top_k,
             search_k=vector_store_config.search_k,
-            return_distances=vector_store_config.return_distances
+            return_scores=vector_store_config.return_scores
         )
-        predictions = melanet_rrf(
-            retrieved_results=indexes_preds,
-            top_n=vector_store_config.rerank_top_n,
-            k=vector_store_config.rrf_k
-        )
+
+        predictions = {}
     else:
         vector_store = NNClassifier(
-            cls_ids=np.asarray(index[eval_args.label_column_name]),
-            embeddings=np.asarray(index[features_columns[0]]),
+            cls_ids=np.asarray(index_extracted_features[eval_args.label_column_name].to_list()),
+            embeddings=np.asarray(index_extracted_features[features_columns[0]].to_list(), dtype=np.float32).squeeze(),
             metric=vector_store_config.metric,
             pca_components=vector_store_config.pca_components
         )
-
-        predictions = vector_store.predict(
-            query_embeddings= np.asarray(dataset[features_columns[0]]),
+        retrieved_labels_w_dist = vector_store.predict(
+            query_embeddings= np.asarray(eval_extracted_features[features_columns[0]].to_list(), dtype=np.float32).squeeze(),
             top_k=vector_store_config.top_k,
             search_k=vector_store_config.search_k,
-            return_distances=vector_store_config.return_distances
+            return_scores=True
         )
 
+        predictions = {}
+        if vector_store_config.top_k == 1:
+            mapped_predictions = pd.DataFrame(
+                [(id_, label, dist) for id_, (label, dist) in zip(eval_extracted_features[eval_args.id_column_name], retrieved_labels_w_dist)],
+                columns=[eval_args.id_column_name, "label", "score"]
+            )
+            mapped_predictions_grouped = mapped_predictions.groupby(eval_args.id_column_name)
+            for lesion_id in mapped_predictions_grouped.groups:
+                lesion_preds = mapped_predictions_grouped.get_group(lesion_id)
+                if eval_args.prediction_resolution_strategy == "greedy":
+                    idx_pred = lesion_preds["score"].argmin() if vector_store_config.metric == "l2" else lesion_preds["score"].argmax()
+                    prediction = lesion_preds["label"].iloc[idx_pred]
+                elif eval_args.prediction_resolution_strategy == "first":
+                    prediction = lesion_preds["label"].iloc[0]
+                elif eval_args.prediction_resolution_strategy == "last":
+                    prediction = lesion_preds["label"].iloc[-1]
+                else:
+                    prediction = -1
+                predictions[lesion_id] = int(prediction)
+        else:
+            mapped_predictions = pd.DataFrame(
+                [(id_, *zip(*preds_w_dist)) for id_, preds_w_dist in zip(eval_extracted_features[eval_args.id_column_name], retrieved_labels_w_dist)],
+                columns=[eval_args.id_column_name, "label", "score"]
+            )
+            mapped_predictions_grouped = mapped_predictions.groupby(eval_args.id_column_name)
+            for lesion_id in mapped_predictions_grouped.groups:
+                lesion_preds = mapped_predictions_grouped.get_group(lesion_id)
+                if eval_args.prediction_resolution_strategy == "greedy":
+                    exploded_lesion_preds = lesion_preds.explode(["label", "score"])
+                    idx_pred = exploded_lesion_preds["score"].argmin() if vector_store_config.metric == "l2" else exploded_lesion_preds["score"].argmax()
+                    prediction = exploded_lesion_preds["label"].iloc[idx_pred]
+                elif eval_args.prediction_resolution_strategy == "first":
+                    prediction = lesion_preds["label"].iloc[0][0]
+                elif eval_args.prediction_resolution_strategy == "last":
+                    prediction = lesion_preds["label"].iloc[-1][0]
+                elif eval_args.prediction_resolution_strategy == "rrf":
+                    rrf_preds = reciprocal_rank_fusion(
+                        results=lesion_preds["label"].to_list(),
+                        top_n=vector_store_config.rerank_top_n,
+                        k=vector_store_config.rrf_k,
+                        items_have_scores=False
+                    )
+                    prediction = rrf_preds[0]
+                else:
+                    prediction = -1
+                predictions[lesion_id] = int(prediction)
+
     if metrics is not None:
+        logger.info("Computing metrics")
+        mapped_labels = pd.DataFrame({
+            eval_args.id_column_name: dataset[eval_args.id_column_name],
+            eval_args.label_column_name: dataset[eval_args.label_column_name],
+        })
+        mapped_labels = mapped_labels.drop_duplicates(eval_args.id_column_name)
+
+        if len(mapped_labels) != len(predictions):
+            return predictions
+        mapped_labels["prediction"] = mapped_labels[eval_args.id_column_name].map(predictions)
+        if mapped_labels["prediction"].hasnans:
+            return predictions
+        mapped_labels["prediction"] = mapped_labels["prediction"].astype(int)
+
         metrics_update_state(
-            predictions=predictions,
-            label_ids=dataset[eval_args.label_column_name],
+            predictions=np.asarray(mapped_labels["prediction"].to_list()),
+            label_ids=mapped_labels[eval_args.label_column_name].to_list(),
             metrics=metrics,
+            classification_task=eval_args.classification_task,
             predictions_type="labels"
         )
 
-    return predictions.tolist()
+    return predictions
 
 
 def evaluate(eval_args: EvaluateArguments):
+    logger.info(f"Evaluation parameters {eval_args}")
+
     # Prepare and load dataset
     if eval_args.eval_as_feature_extraction:
         assert eval_args.index_name is not None, "For zero-shot classification provide dataset `index_name` that will be used as index"
@@ -500,6 +702,8 @@ def evaluate(eval_args: EvaluateArguments):
             eval_args=eval_args,
             dataset_split=eval_args.eval_split
         )
+        logger.info(f"Loaded index {index}")
+        logger.info(f"Loaded eval dataset {dataset}")
         if eval_args.index_size is not None:
             _index_size = eval_args.index_size if eval_args.index_size < 1.0 else int(eval_args.index_size)
             if isinstance(_index_size, int):
@@ -524,6 +728,7 @@ def evaluate(eval_args: EvaluateArguments):
             eval_args=eval_args,
             dataset_split=eval_args.eval_split
         )
+        logger.info(f"Loaded eval dataset {dataset}")
 
     # Init model
     model = MelaNet(
@@ -544,6 +749,8 @@ def evaluate(eval_args: EvaluateArguments):
         dataset=dataset,
         eval_args=eval_args
     )
+    if has_gt_labels:
+        logger.info(f"Loaded eval dataset has {len(labels)} ground truth labels")
 
     # Load metrics for given task
     metrics = _get_classification_metrics(
@@ -551,22 +758,41 @@ def evaluate(eval_args: EvaluateArguments):
         num_classes=len(labels),
         eval_feature_extraction=eval_args.eval_as_feature_extraction
     ) if labels is not None and has_gt_labels else None
+    logger.info(f"Using metrics {metrics}")
+
+    # Load augmentations
+    index_transforms = None
+    tta_transforms = None
+    if eval_args.apply_augmentations:
+        __view_transforms = get_transforms(eval_args.apply_augmentations)
+        index_transforms = __view_transforms
+        tta_transforms = __view_transforms
+    else:
+        if eval_args.index_augmentations:
+            index_transforms = get_transforms(eval_args.index_augmentations)
+        if eval_args.test_time_augmentations:
+            tta_transforms = get_transforms(eval_args.test_time_augmentations)
 
     # Run evaluation
     if eval_args.eval_as_feature_extraction:
+        logger.info("Running eval of feature extractor")
         predictions = feature_extraction_predict(
             model=model,
             index=index,
             dataset=dataset,
             eval_args=eval_args,
-            metrics=metrics
+            metrics=metrics,
+            index_transforms=index_transforms,
+            tta_transforms=tta_transforms
         )
     else:
+        logger.info("Running eval of classifier")
         predictions = classifier_predict(
             model=model,
             dataset=dataset,
             eval_args=eval_args,
-            metrics=metrics
+            metrics=metrics,
+            tta_transforms=tta_transforms
         )
 
     results = {
@@ -588,18 +814,20 @@ def evaluate(eval_args: EvaluateArguments):
         }
         results["metrics"] = eval_metric
 
+    logger.info(f"Saving final results to file {eval_args.results_path}")
     with open(eval_args.results_path, "w") as f:
         json.dump(results, f, indent=2, ensure_ascii=False)
 
     if eval_args.isic_submission_path and eval_args.isic_submission_path.endswith(".csv"):
         try:
             # Currently set up for MILK10k dataset
+            logger.info(f"Converting final results to ISIC/MILK submission CSV")
             format_isic_submission(
                 predictions=predictions,
                 labels=labels,
                 dataset=dataset,
                 image_id_column_name="isic_id",
-                lesion_id_column_name="lesion_id",
+                lesion_id_column_name=eval_args.id_column_name,
                 csv_submission_path=eval_args.isic_submission_path,
                 drop_duplicates=True
             )

@@ -1,0 +1,13 @@
+python run_eval.py \
+    --classification_task "multiclass" \
+    --eval_as_feature_extraction True \
+    --model_name_or_path "/home/sulcm/models/melanet/resnet50/melanet_resnet50_grid-cdvq05pb" \
+    --dataset_name "/home/sulcm/datasets/milk10k/SpilledMILK10k" \
+    --eval_split "validation" \
+    --index_name "/home/sulcm/datasets/milk10k/SpilledMILK10k" \
+    --index_split "train" \
+    --label_column_name "label" \
+    --results_path "./outputs/debug_feature_extraction.json" \
+    --batch_size 128 \
+    --id_column_name "lesion_id" \
+    --isic_submission_path "./outputs/debug_feature_extraction.csv"

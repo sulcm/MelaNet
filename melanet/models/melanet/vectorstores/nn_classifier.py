@@ -39,15 +39,16 @@ class NNClassifier():
 
         return index
 
-    def predict(self, query_embeddings: np.ndarray, top_k: int = 1, search_k: int = 20, return_distances: bool = False) -> np.ndarray:
+    def predict(self, query_embeddings: np.ndarray, top_k: int = 1, search_k: int = 20, return_scores: bool = False) -> list:
         """
         Retrieve top-K unique classes for each query embedding.
         Args:
             query_embeddings: np.ndarray of shape (Q, D)
             top_k: number of unique classes to return
             search_k: number of nearest neighbors to retrieve before filtering duplicates
+            return_scores: return tuple per element with (class, score)
         Returns:
-            List of lists of tuples [(class, distance), ...] per query
+            List of lists of tuples [(class, score), ...] per query
         """
         if self.pca is not None:
             query_embeddings = self.pca(query_embeddings)
@@ -59,7 +60,7 @@ class NNClassifier():
                 cls = self.idx2cls[idx_row[0]]
                 dist = dist_row[0]
                 results.append(
-                    (cls, dist) if return_distances else cls
+                    (cls, dist) if return_scores else cls
                 )
             else:
                 seen = OrderedDict()
@@ -70,6 +71,6 @@ class NNClassifier():
                     if len(seen) >= top_k:
                         break
                 results.append(
-                    list(seen.items()) if return_distances else list(seen.keys())
+                    list(seen.items()) if return_scores else list(seen.keys())
                 )
-        return np.array(results)
+        return results

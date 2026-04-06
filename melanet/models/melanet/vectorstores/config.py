@@ -22,9 +22,9 @@ class VectorStoreConfig(BaseModel):
         default=20,
         description="Search for K closest elements in index. Only applied if `top_k > 1`."
     )
-    return_distances: Optional[bool] = Field(
+    return_scores: Optional[bool] = Field(
         default=False,
-        description="Whether to return tuple `[(class, distance), ...]` or only `[class, ...]`."
+        description="Whether to return tuple `[(class, score), ...]` or only `[class, ...]`."
     )
     rerank_top_n: Optional[int] = Field(
         default=1,

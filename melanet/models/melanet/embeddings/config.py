@@ -10,6 +10,14 @@ class FeatureExtractorConfig(BaseModel):
         - "sum": applies weighted sum of embeddings
         - "concat": concatenates embeddings into single vector `[ft_embeds, zero_shot_embeds]`"""
     )
+    normalize_output: Optional[bool] = Field(
+        default=False,
+        description="Whether to apply L2 normalization to embeddings vectors. Defaults to `False`."
+    )
+    pre_norm: Optional[bool] = Field(
+        default=False,
+        description="Do L2 normalization before applying merging strategies of embeddings (output_type in ['sum', 'concat']). Defaults to `False`."
+    )
     alpha: Optional[float] = Field(
         default=None,
         description="""Used when `output_type="sum"` in form $\alpha * ft_embeds + (1 - \alpha) * zero_shot_embeds$"""

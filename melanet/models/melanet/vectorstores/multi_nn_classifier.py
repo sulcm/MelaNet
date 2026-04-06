@@ -34,14 +34,14 @@ class MultiNNClassifier():
             for (_idx_name, _embeds), _metric, _pca_c in zip(embeddings.items(), metric, pca_components)
         }
 
-    def predict(self, query_embeddings: dict[str, np.ndarray], top_k: int = 1, search_k: int = 20, return_distances: bool = False) -> dict[str, np.ndarray]:
+    def predict(self, query_embeddings: dict[str, np.ndarray], top_k: int = 1, search_k: int = 20, return_scores: bool = False) -> dict[str, list]:
         """
         Retrieve top-K unique classes for each query embedding.
         Args:
             query_embeddings: dict of index names to search with queries (np.ndarray of shape (Q, D))
             top_k: number of unique classes to return
             search_k: number of nearest neighbors to retrieve before filtering duplicates
-            return_distances: return tuple per element with (class, distance)
+            return_scores: return tuple per element with (class, score)
         Returns:
             Dict with lists of results per index
         """
@@ -51,6 +51,6 @@ class MultiNNClassifier():
                 query_embeddings=query_embed,
                 top_k=top_k,
                 search_k=search_k,
-                return_distances=return_distances
+                return_scores=return_scores
             )
         return search_results

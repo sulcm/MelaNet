@@ -72,7 +72,7 @@ class MelaNet():
         else:
             return None
 
-    def forward(self, image, return_logits: bool = False) -> np.ndarray:
+    def forward(self, image, return_logits: bool = False, **kwargs) -> np.ndarray:
         inputs = self.image_processor(images=image, return_tensors="pt").to(self.device)
         outputs = self.model(**inputs)
 
@@ -83,7 +83,7 @@ class MelaNet():
             predicted_class_idx = tensor2numpy(logits.argmax(-1))
             return predicted_class_idx
 
-    def extract_features(self, image, text = None) -> Union[torch.Tensor, FeatureExtractorOutput]:
+    def extract_features(self, image, text = None, **kwargs) -> Union[torch.Tensor, FeatureExtractorOutput]:
         if self.ft_model is not None:
             ft_embeds = self.ft_model.extract_features(image=image)
         else:
@@ -99,19 +99,24 @@ class MelaNet():
             zero_shot_embeddings=zero_shot_embeds
         )
         if self.__feature_extractor_config.output_type == "object":
-            return output
+            return output.l2_normalize() if self.__feature_extractor_config.normalize_output else output
         elif self.__feature_extractor_config.output_type == "sum":
             return output.sum(
-                alpha=self.__feature_extractor_config.alpha
+                alpha=self.__feature_extractor_config.alpha,
+                normalize=self.__feature_extractor_config.normalize_output,
+                pre_norm=self.__feature_extractor_config.pre_norm
             )
         elif self.__feature_extractor_config.output_type == "concat":
-            return output.concat()
+            return output.concat(
+                normalize=self.__feature_extractor_config.normalize_output,
+                pre_norm=self.__feature_extractor_config.pre_norm
+            )
         else:
             raise ValueError(
                 "Unsupported `output_type` for zero-shot feature extraction. Must be one of: 'object', 'sum', 'concat'"
             )
 
-    def __call__(self, image, *, text = None, return_logits: bool = False):
+    def __call__(self, image, *, text = None, return_logits: bool = False, **kwargs):
         if self.is_feature_extractor:
             return self.extract_features(
                 image=image,
