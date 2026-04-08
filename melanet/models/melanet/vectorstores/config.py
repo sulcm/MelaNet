@@ -22,6 +22,10 @@ class VectorStoreConfig(BaseModel):
         default=20,
         description="Search for K closest elements in index. Only applied if `top_k > 1`."
     )
+    unique_only: Optional[bool] = Field(
+        default=False,
+        description="Retrive only unique (with best score) representants to given query. Applies only when `top_k > 1`."
+    )
     return_scores: Optional[bool] = Field(
         default=False,
         description="Whether to return tuple `[(class, score), ...]` or only `[class, ...]`."

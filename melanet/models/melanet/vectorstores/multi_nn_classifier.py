@@ -34,16 +34,25 @@ class MultiNNClassifier():
             for (_idx_name, _embeds), _metric, _pca_c in zip(embeddings.items(), metric, pca_components)
         }
 
-    def predict(self, query_embeddings: dict[str, np.ndarray], top_k: int = 1, search_k: int = 20, return_scores: bool = False) -> dict[str, list]:
+    def predict(
+        self,
+        query_embeddings: dict[str, np.ndarray],
+        top_k: int = 1,
+        search_k: int = 20,
+        unique_only: bool = False,
+        return_scores: bool = False
+    ) -> dict[str, list[int | tuple[int, float]]]:
         """
-        Retrieve top-K unique classes for each query embedding.
+        Retrieve classes for each query embedding from every specified index.
+
         Args:
-            query_embeddings: dict of index names to search with queries (np.ndarray of shape (Q, D))
-            top_k: number of unique classes to return
-            search_k: number of nearest neighbors to retrieve before filtering duplicates
-            return_scores: return tuple per element with (class, score)
+            query_embeddings (dict[str, np.ndarray]): Index names to search with queries (Numpy ndarray of shape (Q, D)).
+            top_k (int): Number of predictions (classifications) to return. Defaults to `1`.
+            search_k (int): Number of nearest neighbors to retrieve before filtering. Defaults to `20`.
+            unique_only (bool): Return only unique (with best score) representants to given query (applies only when `top_k > 1`). Defaults to `False`.
+            return_scores (bool): Return tuple per element as `(class, score)`. Defaults to `False`.
         Returns:
-            Dict with lists of results per index
+            dict[str, list[int | tuple[int, float]]]: Per index results as list of predictions `[class, ...]` or tuples `[(class, score), ...]` per query.
         """
         search_results = {}
         for index_name, query_embed in query_embeddings.items():
@@ -51,6 +60,7 @@ class MultiNNClassifier():
                 query_embeddings=query_embed,
                 top_k=top_k,
                 search_k=search_k,
+                unique_only=unique_only,
                 return_scores=return_scores
             )
         return search_results

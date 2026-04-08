@@ -197,6 +197,27 @@ class EvaluateArguments:
         metadata={"help": "Random seed that will be set to ensure reproducibility. Defaults to 42."}
     )
 
+    def __override_none_args(self, arg_name: str):
+        str_none_values = ("none", "null", "nan")
+        num_none_values = (-1,)
+
+        current_value = getattr(self, arg_name, None)
+        if current_value is None:
+            return
+        elif isinstance(current_value, str):
+            if current_value.lower() in str_none_values:
+                setattr(self, arg_name, None)
+        elif isinstance(current_value, (int, float)):
+            if current_value in num_none_values:
+                setattr(self, arg_name, None)
+        else:
+            pass
+
+    def __post_init__(self):
+        self.__override_none_args("apply_augmentations")
+        self.__override_none_args("index_augmentations")
+        self.__override_none_args("test_time_augmentations")
+
 
 def _get_classification_metrics(
     task: Literal["binary", "multiclass", "multilabel"],
@@ -586,17 +607,33 @@ def feature_extraction_predict(
             metric=vector_store_config.metric,
             pca_components=vector_store_config.pca_components
         )
-        indexes_preds = vector_store.predict(
+        indexes_preds_w_scores = vector_store.predict(
             query_embeddings={
                 feat_name: np.asarray(eval_extracted_features[feat_name].to_list(), dtype=np.float32).squeeze()
                 for feat_name in features_columns
             },
             top_k=vector_store_config.top_k,
             search_k=vector_store_config.search_k,
-            return_scores=vector_store_config.return_scores
+            unique_only=vector_store_config.unique_only,
+            return_scores=True
         )
 
-        predictions = {}
+        if vector_store_config.top_k == 1:
+            mapped_predictions = pd.DataFrame(
+                [
+                    (id_, label, dist, index_name)
+                    for index_name, retrieved_labels_w_scores in indexes_preds_w_scores.items() for id_, (label, dist) in zip(eval_extracted_features[eval_args.id_column_name], retrieved_labels_w_scores)
+                ],
+                columns=[eval_args.id_column_name, "label", "score", "index_name"]
+            )
+        else:
+            mapped_predictions = pd.DataFrame(
+                [
+                    (id_, *zip(*preds_w_scores), index_name)
+                    for index_name, retrieved_labels_w_scores in indexes_preds_w_scores.items() for id_, preds_w_scores in zip(eval_extracted_features[eval_args.id_column_name], retrieved_labels_w_scores)
+                ],
+                columns=[eval_args.id_column_name, "label", "score", "index_name"]
+            )
     else:
         vector_store = NNClassifier(
             cls_ids=np.asarray(index_extracted_features[eval_args.label_column_name].to_list()),
@@ -604,59 +641,76 @@ def feature_extraction_predict(
             metric=vector_store_config.metric,
             pca_components=vector_store_config.pca_components
         )
-        retrieved_labels_w_dist = vector_store.predict(
+        retrieved_labels_w_scores = vector_store.predict(
             query_embeddings= np.asarray(eval_extracted_features[features_columns[0]].to_list(), dtype=np.float32).squeeze(),
             top_k=vector_store_config.top_k,
             search_k=vector_store_config.search_k,
+            unique_only=vector_store_config.unique_only,
             return_scores=True
         )
 
-        predictions = {}
         if vector_store_config.top_k == 1:
             mapped_predictions = pd.DataFrame(
-                [(id_, label, dist) for id_, (label, dist) in zip(eval_extracted_features[eval_args.id_column_name], retrieved_labels_w_dist)],
+                [(id_, label, dist) for id_, (label, dist) in zip(eval_extracted_features[eval_args.id_column_name], retrieved_labels_w_scores)],
                 columns=[eval_args.id_column_name, "label", "score"]
             )
-            mapped_predictions_grouped = mapped_predictions.groupby(eval_args.id_column_name)
-            for lesion_id in mapped_predictions_grouped.groups:
-                lesion_preds = mapped_predictions_grouped.get_group(lesion_id)
-                if eval_args.prediction_resolution_strategy == "greedy":
-                    idx_pred = lesion_preds["score"].argmin() if vector_store_config.metric == "l2" else lesion_preds["score"].argmax()
-                    prediction = lesion_preds["label"].iloc[idx_pred]
-                elif eval_args.prediction_resolution_strategy == "first":
-                    prediction = lesion_preds["label"].iloc[0]
-                elif eval_args.prediction_resolution_strategy == "last":
-                    prediction = lesion_preds["label"].iloc[-1]
-                else:
-                    prediction = -1
-                predictions[lesion_id] = int(prediction)
         else:
             mapped_predictions = pd.DataFrame(
-                [(id_, *zip(*preds_w_dist)) for id_, preds_w_dist in zip(eval_extracted_features[eval_args.id_column_name], retrieved_labels_w_dist)],
+                [(id_, *zip(*preds_w_scores)) for id_, preds_w_scores in zip(eval_extracted_features[eval_args.id_column_name], retrieved_labels_w_scores)],
                 columns=[eval_args.id_column_name, "label", "score"]
             )
-            mapped_predictions_grouped = mapped_predictions.groupby(eval_args.id_column_name)
-            for lesion_id in mapped_predictions_grouped.groups:
-                lesion_preds = mapped_predictions_grouped.get_group(lesion_id)
-                if eval_args.prediction_resolution_strategy == "greedy":
-                    exploded_lesion_preds = lesion_preds.explode(["label", "score"])
-                    idx_pred = exploded_lesion_preds["score"].argmin() if vector_store_config.metric == "l2" else exploded_lesion_preds["score"].argmax()
-                    prediction = exploded_lesion_preds["label"].iloc[idx_pred]
-                elif eval_args.prediction_resolution_strategy == "first":
-                    prediction = lesion_preds["label"].iloc[0][0]
-                elif eval_args.prediction_resolution_strategy == "last":
-                    prediction = lesion_preds["label"].iloc[-1][0]
-                elif eval_args.prediction_resolution_strategy == "rrf":
-                    rrf_preds = reciprocal_rank_fusion(
-                        results=lesion_preds["label"].to_list(),
-                        top_n=vector_store_config.rerank_top_n,
-                        k=vector_store_config.rrf_k,
-                        items_have_scores=False
-                    )
-                    prediction = rrf_preds[0]
-                else:
-                    prediction = -1
-                predictions[lesion_id] = int(prediction)
+
+    predictions = {}
+    if vector_store_config.top_k == 1:
+        mapped_predictions_grouped = mapped_predictions.groupby(eval_args.id_column_name)
+        for lesion_id in mapped_predictions_grouped.groups:
+            lesion_preds = mapped_predictions_grouped.get_group(lesion_id)
+            if eval_args.prediction_resolution_strategy == "greedy":
+                idx_pred = lesion_preds["score"].argmin() if vector_store_config.metric == "l2" else lesion_preds["score"].argmax()
+                prediction = lesion_preds["label"].iloc[idx_pred]
+            elif eval_args.prediction_resolution_strategy == "first":
+                prediction = lesion_preds["label"].iloc[0]
+            elif eval_args.prediction_resolution_strategy == "last":
+                prediction = lesion_preds["label"].iloc[-1]
+            elif eval_args.prediction_resolution_strategy == "rrf":
+                # majority voting
+                sorted_lesion_preds = lesion_preds.sort_values(
+                    "score",
+                    ascending=vector_store_config.metric == "l2"
+                )
+                rrf_preds = reciprocal_rank_fusion(
+                    results=[sorted_lesion_preds["label"].to_list(),],
+                    top_n=vector_store_config.rerank_top_n,
+                    k=vector_store_config.rrf_k,
+                    items_have_scores=False
+                )
+                prediction = rrf_preds[0]
+            else:
+                prediction = -1
+            predictions[lesion_id] = int(prediction)
+    else:
+        mapped_predictions_grouped = mapped_predictions.groupby(eval_args.id_column_name)
+        for lesion_id in mapped_predictions_grouped.groups:
+            lesion_preds = mapped_predictions_grouped.get_group(lesion_id)
+            if eval_args.prediction_resolution_strategy == "greedy":
+                exploded_lesion_preds = lesion_preds.explode(["label", "score"])
+                idx_pred = exploded_lesion_preds["score"].argmin() if vector_store_config.metric == "l2" else exploded_lesion_preds["score"].argmax()
+                prediction = exploded_lesion_preds["label"].iloc[idx_pred]
+            elif eval_args.prediction_resolution_strategy == "first":
+                prediction = lesion_preds["label"].iloc[0][0]
+            elif eval_args.prediction_resolution_strategy == "last":
+                prediction = lesion_preds["label"].iloc[-1][0]
+            elif eval_args.prediction_resolution_strategy == "rrf":
+                rrf_preds = reciprocal_rank_fusion(
+                    results=lesion_preds["label"].to_list(),
+                    top_n=vector_store_config.rerank_top_n,
+                    k=vector_store_config.rrf_k,
+                    items_have_scores=False
+                )
+                prediction = rrf_preds[0]
+            else:
+                prediction = -1
+            predictions[lesion_id] = int(prediction)
 
     if metrics is not None:
         logger.info("Computing metrics")
@@ -805,6 +859,7 @@ def evaluate(eval_args: EvaluateArguments):
         },
         "task": eval_args.classification_task,
         "as_feature_extractor": eval_args.eval_as_feature_extraction,
+        "prediction_resolution_strategy": eval_args.prediction_resolution_strategy,
         "predictions": predictions,
     }
     if metrics is not None:
@@ -813,6 +868,13 @@ def evaluate(eval_args: EvaluateArguments):
             for metric_name, metric in metrics.items()
         }
         results["metrics"] = eval_metric
+    if eval_args.eval_as_feature_extraction:
+        if eval_args.apply_augmentations:
+            results["index_augmentations"] = eval_args.apply_augmentations
+            results["test_time_augmentations"] = eval_args.apply_augmentations
+        else:
+            results["index_augmentations"] = eval_args.index_augmentations
+            results["test_time_augmentations"] = eval_args.test_time_augmentations
 
     logger.info(f"Saving final results to file {eval_args.results_path}")
     with open(eval_args.results_path, "w") as f:
