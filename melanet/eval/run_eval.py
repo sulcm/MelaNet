@@ -597,6 +597,7 @@ def feature_extraction_predict(
             )
 
     vector_store_config = VectorStoreConfig.from_cli(eval_args.vector_store_config) if eval_args.vector_store_config is not None else create_default_vector_store_config()
+    logger.info(f"Vector store config {vector_store_config}")
     if len(features_columns) > 1:
         vector_store = MultiNNClassifier(
             cls_ids=np.asarray(index_extracted_features[eval_args.label_column_name].to_list()),
@@ -869,6 +870,14 @@ def evaluate(eval_args: EvaluateArguments):
         }
         results["metrics"] = eval_metric
     if eval_args.eval_as_feature_extraction:
+        results["index"] = {
+            "name": eval_args.index_name,
+            "split": eval_args.index_split,
+            "size": eval_args.index_size
+        }
+        results["feature_extractor_config"] = eval_args.feature_extractor_config
+        results["zero_shot_config"] = eval_args.zero_shot_config
+        results["vector_store_config"] = eval_args.vector_store_config
         if eval_args.apply_augmentations:
             results["index_augmentations"] = eval_args.apply_augmentations
             results["test_time_augmentations"] = eval_args.apply_augmentations
