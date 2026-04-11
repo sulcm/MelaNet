@@ -35,7 +35,7 @@ class OpenCLIPWrapper():
         image_features = self.model.encode_image(
             image_tensor_proc.to(self.device)
         )
-        if self.config.normalize_output:
+        if self.config.pre_norm:
             image_features = normalize_embeddings(image_features)
 
         if self.config.add_text_embeddings and text is not None:
@@ -45,13 +45,15 @@ class OpenCLIPWrapper():
             text_features = self.model.encode_text(
                 text_tensor_proc.to(self.device)
             )
-            if self.config.normalize_output:
+            if self.config.pre_norm:
                 text_features = normalize_embeddings(text_features)
         else:
             text_features = None
 
         if text_features is None:
-            return image_features
+            return normalize_embeddings(
+                image_features
+            ) if self.config.normalize_output else image_features
         else:
             if self.config.output_type == "sum":
                 extracted_features = self.config.alpha * image_features + (1.0 - self.config.alpha) * text_features

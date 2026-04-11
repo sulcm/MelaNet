@@ -892,7 +892,7 @@ def evaluate(eval_args: EvaluateArguments):
     if eval_args.isic_submission_path and eval_args.isic_submission_path.endswith(".csv"):
         try:
             # Currently set up for MILK10k dataset
-            logger.info(f"Converting final results to ISIC/MILK submission CSV")
+            logger.info(f"Converting final results to ISIC/MILK submission CSV {eval_args.isic_submission_path}")
             format_isic_submission(
                 predictions=predictions,
                 labels=labels,

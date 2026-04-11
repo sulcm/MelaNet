@@ -14,6 +14,10 @@ class ZeroShotConfig(BaseModel):
         default=False,
         description="Whether to apply L2 normalization to embeddings vectors. Defaults to `False`."
     )
+    pre_norm: Optional[bool] = Field(
+        default=False,
+        description="Do L2 normalization before applying merging strategies of embeddings (output_type in ['sum', 'concat']). Defaults to `False`."
+    )
     alpha: Optional[float] = Field(
         default=None,
         description="""Used when `output_type="sum"` in form $\alpha * image_embeds + (1 - \alpha) * text_embeds$"""
