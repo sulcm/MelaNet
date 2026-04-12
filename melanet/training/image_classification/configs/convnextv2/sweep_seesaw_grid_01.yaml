@@ -58,7 +58,7 @@ parameters:
   optim:
     value: "adamw_torch"
   learning_rate:
-    values: [1e-6, 5e-6, 1e-5, 5e-5]
+    values: [1e-6, 1e-5, 5e-5, 1e-4]
   apply_augmentations_prob:
     value: 0.75
   weight_decay:

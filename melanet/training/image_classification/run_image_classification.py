@@ -420,6 +420,7 @@ def main(args: Optional[dict[str, Any]] = None):
         + f"distributed training: {training_args.parallel_mode.value == 'distributed'}, 16-bits training: {training_args.fp16}"
     )
     logger.info(f"Training/evaluation parameters {training_args}")
+    logger.info(f"Auxiliary parameters {aux_args}")
 
     # Detecting last checkpoint
     last_checkpoint = None
@@ -641,6 +642,7 @@ def main(args: Optional[dict[str, Any]] = None):
             aux_args.supcon_loss_multiplier,
             F_supcon_loss
         ))
+    logger.info(f"Loss functions {losses}")
 
     # Create override method for `compute_loss_func`
     # Input expects model_outputs (`dict` or `ImageClassifierOutput`), labels (`Tensor`), and num_items_in_batch (`Tensor`, optional)
