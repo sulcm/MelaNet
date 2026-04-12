@@ -1,5 +1,5 @@
-name: Sweep-MelanoMix-Grid-Swin-v2
-description: "Swin Transformer v2 Base MelanoMix grid search sweep training"
+name: Sweep-SeeSaw-Grid-ConvNeXt-v2
+description: "ConvNeXt-V2 grid search sweep training with SeeSaw loss V2"
 method: grid
 metric:
   goal: minimize
@@ -7,14 +7,14 @@ metric:
 parameters:
   # Model:
   model_name_or_path:
-    value: "timm/swinv2_base_window12to24_192to384.ms_in22k_ft_in1k"
+    value: "timm/convnextv2_base.fcmae_ft_in22k_in1k_384"
   ignore_mismatched_sizes:
     value: True
   fp16:
     value: True
   # Dataset:
   dataset_name:
-    value: "metacentrum_scratch/MelanoMix"
+    value: "metacentrum_scratch/SpilledMILK10k"
   image_column_name:
     value: "image"
   label_column_name:
@@ -25,7 +25,7 @@ parameters:
   classification_task:
     value: "multiclass"
   output_dir:
-    value: "/storage/plzen4-ntis/home/sulcm01/outputs/swinv2_base/melanet_swinv2_base_melanomix_grid"
+    value: "/storage/plzen4-ntis/home/sulcm01/outputs/convnext_v2/melanet_convnext_v2_seesaw_grid"
   overwrite_output_dir:
     value: True
   save_steps:
@@ -41,7 +41,7 @@ parameters:
   logging_strategy:
     value: "steps"
   logging_steps:
-    value: 200
+    value: 100
   do_train:
     value: True
   do_eval:
@@ -58,30 +58,34 @@ parameters:
   optim:
     value: "adamw_torch"
   learning_rate:
-    values: [1e-6, 5e-6, 1e-5, 1e-4]
+    values: [5e-6, 1e-5, 2.5e-5]
   apply_augmentations_prob:
     value: 0.75
   weight_decay:
     value: 1e-5
   final_dropout:
     value: 0.2
-  hidden_dropout:
-    value: 0.1
   drop_path_rate:
     value: 0.1
   lr_scheduler_type:
     value: "cosine"
   warmup_ratio:
     value: 0.05
+  seesaw_loss_multiplier:
+    value: 1.0
+  seesaw_p:
+    value: 0.9
+  seesaw_q:
+    value: 2.5
   per_device_train_batch_size:
-    values: [8, 16]
+    values: [32, 64]
   gradient_accumulation_steps:
-    value: 4
+    value: 1
   per_device_eval_batch_size:
-    value: 32
+    value: 64
   eval_strategy:
     value: "steps"
   eval_steps:
-    value: 2500
+    value: 1000
   save_strategy:
     value: "steps"
