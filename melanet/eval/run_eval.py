@@ -40,14 +40,8 @@ from formatter.isic import format_isic_submission
 from metacentrum_utils import DATASET_SCRATCH_PREFIX, load_dataset_from_scratch
 
 
-# Setup logging
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
-logging.basicConfig(
-    format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
-    datefmt="%m/%d/%Y %H:%M:%S",
-    handlers=[logging.StreamHandler(sys.stdout)],
-)
+log_levels = logging.getLevelNamesMapping()
 
 
 @dataclass
@@ -183,6 +177,11 @@ class EvaluateArguments:
                 "If column label is provided then among predicted labels compute and writes metrics."
             )
         },
+    )
+    default_log_level = "info"
+    log_level: Literal[*log_levels.keys()] = field( # type:ignore
+        default=default_log_level,
+        metadata={"help": f"Set logging level. Must be one of {list(log_levels.keys())}"},
     )
     device: str = field(
         default="cuda",
@@ -740,6 +739,17 @@ def feature_extraction_predict(
 
 
 def evaluate(eval_args: EvaluateArguments):
+    # Setup logging
+    logging.basicConfig(
+        format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
+        datefmt="%m/%d/%Y %H:%M:%S",
+        handlers=[logging.StreamHandler(sys.stdout)],
+    )
+    log_level = (eval_args.log_level if eval_args.log_level else eval_args.default_log_level).upper()
+    if log_level not in log_levels:
+        log_level = eval_args.default_log_level.upper()
+    logger.setLevel(log_level)
+
     logger.info(f"Evaluation parameters {eval_args}")
 
     # Prepare and load dataset

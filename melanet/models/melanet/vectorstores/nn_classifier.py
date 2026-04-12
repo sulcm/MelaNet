@@ -33,7 +33,7 @@ class NNClassifier():
         elif metric == "ip":
             index = faiss.IndexFlatIP(embs.shape[1])
         else:
-            raise ValueError("Metric must be 'l2' or 'ip'")
+            raise ValueError(f"Metric must be 'l2' or 'ip' but you have provided '{metric}'")
 
         index.add(embs)
 

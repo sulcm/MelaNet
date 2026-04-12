@@ -1,6 +1,6 @@
 import numpy as np
 
-from typing import Optional
+from typing import Optional, Union
 
 from .nn_classifier import NNClassifier
 
@@ -13,14 +13,19 @@ class MultiNNClassifier():
         self,
         cls_ids: list[int],
         embeddings: dict[str, np.ndarray],
-        metric: list[str] = None,
-        pca_components: list[Optional[int]] = None
+        metric: Union[list[str], str] = None,
+        pca_components: Union[list[Optional[int]], Optional[int]] = None
     ):
         if metric is None:
             metric = [self.default_metric,] * len(embeddings)
+        elif isinstance(metric, str):
+            metric = [metric,] * len(embeddings)
+        assert len(metric) == len(embeddings), "You must provide same number of metrics as is number of initialized vector stores or `None`."
+
         if pca_components is None:
             pca_components = [self.default_pca_components,] * len(embeddings)
-        assert len(metric) == len(embeddings), "You must provide same number of metrics as is number of initialized vector stores or `None`."
+        elif isinstance(pca_components, int):
+            pca_components = [pca_components,] * len(embeddings)
         assert len(pca_components) == len(embeddings), "You must provide same number of PCA components as is number of initialized vector stores or `None`."
 
         self.idx2cls = cls_ids

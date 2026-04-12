@@ -1,5 +1,3 @@
-import numpy as np
-
 from collections import defaultdict
 
 
@@ -29,16 +27,16 @@ def reciprocal_rank_fusion(results: list[list], top_n: int = 1, k: float = 60.0,
     return [rrf_item for rrf_item, score in fused[:top_n]]
 
 
-def melanet_rrf(retrieved_results: dict[str, np.ndarray], top_n: int = 1, k: float = 60.0) -> np.ndarray:
+def melanet_rrf(retrieved_results: dict[str, list[list]], top_n: int = 1, k: float = 60.0) -> list:
     results = []
     for results2rerank in zip(*retrieved_results.values()):
         rrf_pred = reciprocal_rank_fusion(
             results=results2rerank,
             top_n=top_n,
             k=k,
-            items_have_scores=results2rerank[0].ndim > 1
+            items_have_scores=isinstance(results2rerank[0][0], (list, tuple))
         )
         if top_n == 1:
             rrf_pred = rrf_pred[0]
         results.append(rrf_pred)
-    return np.array(results)
+    return results
