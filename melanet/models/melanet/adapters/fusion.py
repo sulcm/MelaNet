@@ -11,38 +11,65 @@ from .config import FeatureAdapterConfig
 class FusionAdapter(LearnableAdapter):
     def __init__(
         self,
-        dim_A: int,
-        dim_B: int,
+        input_dims: list[int],
         fused_dim: int,
+        use_attn: bool = False,
+        attn_num_heads: int = 8,
         hidden_dim: int = 1024,
         dropout: float = 0.1,
         hidden_act: str = "gelu",
         input_l2_norm: bool = False,
-        output_l2_norm: bool = True
+        output_l2_norm: bool = False
     ):
         super(FusionAdapter, self).__init__()
 
         assert hidden_act in self.activation_str2fn.keys(), f"Entered unsupported name of activation function, must be one of {self.activation_str2fn.keys()}"
+        self.__use_attn = use_attn
+        self.__attn_num_heads = attn_num_heads
         self.__hidden_act = hidden_act
+        self.__input_dims = input_dims
+        self.__hidden_dim = hidden_dim
+        self.__fused_dim = fused_dim
+        self.__dropout = dropout
+        self.__num_inputs = len(input_dims)
 
-        self.proj_A = nn.Sequential(
-            nn.Linear(dim_A, hidden_dim),
-            self.activation_str2fn[self.__hidden_act](),
-            nn.Dropout(dropout)
-        )
+        self.input_projections = nn.ModuleList([
+            nn.Sequential(
+                nn.Linear(i_dim, hidden_dim),
+                self.activation_str2fn[self.__hidden_act](),
+                nn.Linear(hidden_dim, hidden_dim),
+                nn.LayerNorm(hidden_dim),
+            )
+            for i_dim in input_dims
+        ])
 
-        self.proj_B = nn.Sequential(
-            nn.Linear(dim_B, hidden_dim),
-            self.activation_str2fn[self.__hidden_act](),
-            nn.Dropout(dropout)
-        )
+        if self.__use_attn:
+            self.input_pos_embed = nn.Parameter(
+                torch.randn(1, self.__num_inputs, hidden_dim)
+            )
+            self.attn_norm = nn.LayerNorm(hidden_dim)
+            self.attn_fusion = nn.MultiheadAttention(
+                embed_dim=hidden_dim,
+                num_heads=attn_num_heads,
+                dropout=dropout,
+                batch_first=True
+            )
+            self.attn_pool = nn.Linear(hidden_dim, 1)
+        else:
+            self.concat_fusion = nn.Sequential(
+                nn.Linear(hidden_dim * self.__num_inputs, hidden_dim * 2),
+                self.activation_str2fn[self.__hidden_act](),
+                nn.Dropout(dropout),
+                nn.Linear(hidden_dim * 2, hidden_dim),
+                nn.LayerNorm(hidden_dim),
+            )
 
-        self.fusion = nn.Sequential(
-            nn.Linear(hidden_dim * 2, hidden_dim),
-            nn.LayerNorm(hidden_dim),
+        self.final_projection = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim),
             self.activation_str2fn[self.__hidden_act](),
             nn.Dropout(dropout),
-            nn.Linear(hidden_dim, fused_dim)
+            nn.Linear(hidden_dim, fused_dim),
+            nn.LayerNorm(fused_dim)
         )
 
         self.input_l2_norm = input_l2_norm
@@ -50,21 +77,42 @@ class FusionAdapter(LearnableAdapter):
 
         self._is_fitted = False
 
-    def forward(self, features_A: torch.Tensor, features_B: torch.Tensor) -> torch.Tensor:
+    def forward(self, input_features: list[torch.Tensor]) -> torch.Tensor:
         assert self.training or self._is_fitted, "FusionAdapter is not fitted. Call `fit()` first."
+        assert len(input_features) == self.__num_inputs, f"Must passed same number of input as is initialized number of input projections, {len(input_features)} != {self.__num_inputs}"
 
-        if self.input_l2_norm:
-            features_A = F.normalize(features_A, p=2, dim=-1)
-            features_B = F.normalize(features_B, p=2, dim=-1)
+        # Input projections into common hidden dim
+        projected_inputs = []
+        for features, input_projection in zip(input_features, self.input_projections):
+            if self.input_l2_norm:
+                features = F.normalize(features, p=2, dim=-1)
+            h_input = input_projection(features)
+            projected_inputs.append(h_input)
 
-        h_A = self.proj_A(features_A)
-        h_B = self.proj_B(features_B)
+        # Fuse projected input into hidden dim
+        H = torch.stack(projected_inputs, dim=1) # (B, N, D)
+        if self.__use_attn:
+            H = H + self.input_pos_embed # Add positional embeddings of inputs
+            H_norm = self.attn_norm(H)
+            H_attn, _ = self.attn_fusion(H_norm, H_norm, H_norm)
+            H = H + H_attn
+            # Pool fused features
+            pool_weights = F.softmax(
+                self.attn_pool(H),
+                dim=1
+            ) # (B, N, 1)
+            h_fused = (H * pool_weights).sum(dim=1)
+        else:
+            H_flat = H.reshape(H.shape[0], -1) # (B, N * D)
+            H_concat = self.concat_fusion(H_flat)
+            H_residual = H.mean(dim=1)
+            h_fused = H_concat + H_residual
 
-        h = torch.cat([h_A, h_B], dim=1)
-        z_fused = self.fusion(h)
-
+        # Final (output) projection into desired dim
+        z_fused = self.final_projection(h_fused)
         if self.output_l2_norm:
             z_fused = F.normalize(z_fused, p=2, dim=-1)
+
         return z_fused
 
     def save_as_pretrained(self, save_path: str, allow_overwrite: bool = True) -> None:
@@ -73,12 +121,13 @@ class FusionAdapter(LearnableAdapter):
             {
                 "state_dict": self.state_dict(),
                 "config": {
-                    "dim_A": self.proj_A[0].in_features,
-                    "dim_B": self.proj_B[0].in_features,
-                    "hidden_dim": self.fusion[-1].in_features,
-                    "fused_dim": self.fusion[-1].out_features,
-                    "dropout": self.fusion[-2].p,
+                    "input_dims": self.__input_dims,
+                    "hidden_dim": self.__hidden_dim,
+                    "fused_dim": self.__fused_dim,
+                    "dropout": self.__dropout,
                     "hidden_act": self.__hidden_act,
+                    "use_attn": self.__use_attn,
+                    "attn_num_heads": self.__attn_num_heads,
                     "input_l2_norm": self.input_l2_norm,
                     "output_l2_norm": self.output_l2_norm
                 }
@@ -88,14 +137,15 @@ class FusionAdapter(LearnableAdapter):
 
     @classmethod
     def from_config(cls, config: FeatureAdapterConfig) -> "FusionAdapter":
-        assert config.in_features_A is not None and config.in_features_B is not None
+        assert config.in_features is not None and isinstance(config.in_features, list)
         init_kwargs = {
-            "dim_A": config.in_features_A,
-            "dim_B": config.in_features_B,
-            "fused_dim": config.out_features,
+            "input_dims": config.in_features,
             "hidden_dim": config.hidden_dim,
+            "fused_dim": config.out_features,
             "dropout": config.dropout,
             "hidden_act": config.hidden_act,
+            "use_attn": config.use_attn,
+            "attn_num_heads": config.attn_num_heads,
             "input_l2_norm": config.input_l2_norm,
             "output_l2_norm": config.output_l2_norm
         }

@@ -33,7 +33,6 @@ class InferenceDataCollator():
 
         if self.transforms:
             images = create_views_batched(images, self.transforms)
-            # expand metadata
             lesion_ids = lesion_ids.repeat(self.num_views)
 
         return {

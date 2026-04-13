@@ -16,21 +16,29 @@ class PCAAdapter(BaseAdapter):
         out_features: int,
         whiten: bool = False,
         seed: Optional[int] = 42,
-        normalize: bool = True
+        input_l2_norm: bool = False,
+        output_l2_norm: bool = False
     ):
         self.pca = PCA(
             n_components=out_features,
             whiten=whiten,
             random_state=seed
         )
-        self.normalize = normalize
+
+        self.input_l2_norm = input_l2_norm
+        self.output_l2_norm = output_l2_norm
+
         self._is_fitted = False
 
     def forward(self, features: np.ndarray) -> np.ndarray:
         assert self._is_fitted, "PCAAdapter is not fitted. Call `fit()` first."
 
+        if self.input_l2_norm:
+            features = normalize_embeddings(features)
+
         proj_features = self.pca.transform(features)
-        if self.normalize:
+
+        if self.output_l2_norm:
             proj_features = normalize_embeddings(proj_features)
         return proj_features
 
@@ -38,8 +46,12 @@ class PCAAdapter(BaseAdapter):
         return self.forward(features)
 
     def fit(self, X: np.ndarray, y = None) -> "PCAAdapter":
+        if self.input_l2_norm:
+            X = normalize_embeddings(X)
+
         self.pca.fit(X)
         self._is_fitted = True
+
         return self
 
     @classmethod
@@ -59,7 +71,8 @@ class PCAAdapter(BaseAdapter):
         init_kwargs = {
             "out_features": config.out_features,
             "whiten": config.whiten,
-            "normalize": config.output_l2_norm,
+            "input_l2_norm": config.input_l2_norm,
+            "output_l2_norm": config.output_l2_norm,
             "seed": config.seed
         }
         init_kwargs = {k: v for k, v in init_kwargs if v is not None or k == "seed"}

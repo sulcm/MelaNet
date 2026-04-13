@@ -1,8 +1,10 @@
 import torch
 import torch.nn as nn
+import numpy as np
 
-from typing import Optional, Any
+from typing import Optional, Union, Any
 from abc import ABC, abstractmethod
+from tqdm import tqdm
 
 from torch.utils.data import DataLoader, TensorDataset
 from transformers import Trainer, TrainingArguments, set_seed
@@ -16,6 +18,10 @@ class BaseAdapter(ABC):
 
     @abstractmethod
     def fit(self, *args, **kwargs) -> "BaseAdapter":
+        ...
+
+    @abstractmethod
+    def forward(self, *args, **kwargs) -> Union[torch.Tensor, np.ndarray]:
         ...
 
     @classmethod
@@ -34,7 +40,7 @@ class BaseAdapter(ABC):
 
 
 class LearnableAdapter(nn.Module, BaseAdapter):
-    activation_str2fn = {
+    activation_str2fn: dict[str, nn.Module] = {
         "gelu": nn.GELU,
         "relu": nn.ReLU,
         "silu": nn.SiLU,
@@ -61,7 +67,9 @@ class LearnableAdapter(nn.Module, BaseAdapter):
             set_seed(seed)
         device = resolve_device(device)
 
-        self.train().to(device)
+        def log(loss, epoch, max_epochs, step, max_steps):
+            print(f"[Epoch: {epoch}/{max_epochs}; Step: {step}/{max_steps}]\tLoss: {loss:.5f}")
+
         training_args = TrainingArguments(
             do_train=True,
             learning_rate=learning_rate,
@@ -104,12 +112,12 @@ class LearnableAdapter(nn.Module, BaseAdapter):
             collate_fn=collate_fn
         )
 
-        def log(loss, epoch, max_epochs, step, max_steps):
-            print(f"[Epoch: {epoch}/{max_epochs}; Step: {step}/{max_steps}]\tLoss: {loss:.5f}")
+        self.train().to(device)
 
         losses = []
         steps = 0
         max_steps = len(data_loader) * epochs
+        tqdm_bar = tqdm(desc="Step", total=max_steps)
         for epoch in range(epochs):
             print("=" * 80)
             for inputs, target in data_loader:
@@ -127,6 +135,7 @@ class LearnableAdapter(nn.Module, BaseAdapter):
 
                 steps += 1
                 losses.append(loss.item())
+                tqdm_bar.update(1)
                 if steps % training_args.logging_steps == 0:
                     log(losses[-1], epoch+1, epochs, steps, max_steps)
             log(losses[-1], epoch+1, epochs, steps, max_steps)
