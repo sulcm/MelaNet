@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field
 
 class FeatureAdapterConfig(BaseModel):
     out_features: int = Field(...)
-    in_features: Union[Optional[int], Optional[list[int]]] = Field(default=None)
+    in_features: Union[int, list[int], None] = Field(default=None)
     bias: Optional[bool] = Field(default=None)
     input_l2_norm: Optional[bool] = Field(default=None)
     output_l2_norm: Optional[bool] = Field(default=None)
@@ -14,6 +14,7 @@ class FeatureAdapterConfig(BaseModel):
     hidden_act: Optional[str] = Field(default=None)
     use_attn: Optional[bool] = Field(default=None)
     attn_num_heads: Optional[int] = Field(default=None)
+    attn_dropout: Optional[float] = Field(default=None)
     seed: Optional[int] = Field(default=42)
 
     @classmethod

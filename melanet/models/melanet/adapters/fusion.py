@@ -15,6 +15,7 @@ class FusionAdapter(LearnableAdapter):
         fused_dim: int,
         use_attn: bool = False,
         attn_num_heads: int = 8,
+        attn_dropout: float = 0.0,
         hidden_dim: int = 1024,
         dropout: float = 0.1,
         hidden_act: str = "gelu",
@@ -26,6 +27,7 @@ class FusionAdapter(LearnableAdapter):
         assert hidden_act in self.activation_str2fn.keys(), f"Entered unsupported name of activation function, must be one of {self.activation_str2fn.keys()}"
         self.__use_attn = use_attn
         self.__attn_num_heads = attn_num_heads
+        self.__attn_dropout = attn_dropout
         self.__hidden_act = hidden_act
         self.__input_dims = input_dims
         self.__hidden_dim = hidden_dim
@@ -51,7 +53,7 @@ class FusionAdapter(LearnableAdapter):
             self.attn_fusion = nn.MultiheadAttention(
                 embed_dim=hidden_dim,
                 num_heads=attn_num_heads,
-                dropout=dropout,
+                dropout=attn_dropout,
                 batch_first=True
             )
             self.attn_pool = nn.Linear(hidden_dim, 1)
@@ -128,6 +130,7 @@ class FusionAdapter(LearnableAdapter):
                     "hidden_act": self.__hidden_act,
                     "use_attn": self.__use_attn,
                     "attn_num_heads": self.__attn_num_heads,
+                    "attn_dropout": self.__attn_dropout,
                     "input_l2_norm": self.input_l2_norm,
                     "output_l2_norm": self.output_l2_norm
                 }
@@ -146,6 +149,7 @@ class FusionAdapter(LearnableAdapter):
             "hidden_act": config.hidden_act,
             "use_attn": config.use_attn,
             "attn_num_heads": config.attn_num_heads,
+            "attn_dropout": config.attn_dropout,
             "input_l2_norm": config.input_l2_norm,
             "output_l2_norm": config.output_l2_norm
         }
