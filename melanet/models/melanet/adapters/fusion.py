@@ -4,11 +4,13 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .base import LearnableAdapter
+from .learnable_base import LearnableAdapter
 from .config import FeatureAdapterConfig
 
 
 class FusionAdapter(LearnableAdapter):
+    adapter_type = "fusion"
+
     def __init__(
         self,
         input_dims: list[int],

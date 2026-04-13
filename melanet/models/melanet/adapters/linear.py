@@ -4,11 +4,13 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .base import LearnableAdapter
+from .learnable_base import LearnableAdapter
 from .config import FeatureAdapterConfig
 
 
 class LinearAdapter(LearnableAdapter):
+    adapter_type = "linear"
+
     def __init__(
         self,
         in_features: int,

@@ -11,6 +11,8 @@ from ..embeddings.utils import normalize_embeddings
 
 
 class PCAAdapter(BaseAdapter):
+    adapter_type = "pca"
+
     def __init__(
         self,
         out_features: int,
