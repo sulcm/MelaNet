@@ -5,6 +5,7 @@ from typing import Optional
 
 from ..config import ZeroShotConfig, create_default_zero_shot_config
 from ...embeddings.utils import normalize_embeddings
+from ...image_utils import make_flat_list_of_images, ensure_pil_image
 from ...utils import resolve_device
 
 
@@ -23,15 +24,22 @@ class OpenCLIPWrapper():
             transform.__class__.__name__ == "ToTensor" for transform in self.image_processor.transforms
         )
 
-    def extract_features(self, image, text=None):
-        if not isinstance(image, list):
-            image = [image,]
-        if self._not_supports_tensor_input:
-            image_tensor_proc = torch.stack(
-                [self.image_processor(im) for im in image]
-            )
-        else:
+    def extract_features(self, image, text=None, **kwargs):
+        if self._not_supports_tensor_input and isinstance(image, torch.Tensor):
+            image = image.cpu().numpy()
+
+        if isinstance(image, torch.Tensor):
             image_tensor_proc = self.image_processor(image)
+            # Add batch dimension if a single image
+            image_tensor_proc = image_tensor_proc.unsqueeze(0) if image_tensor_proc.ndim == 3 else image_tensor_proc
+        else:
+            image = make_flat_list_of_images(image)
+            image_tensor_proc = torch.stack([
+                self.image_processor(
+                    ensure_pil_image(im)
+                ) for im in image
+            ])
+
         image_features = self.model.encode_image(
             image_tensor_proc.to(self.device)
         )
