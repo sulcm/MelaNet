@@ -1,20 +1,21 @@
 import os
-import torch
+import pickle
 import traceback
 import numpy as np
+import pandas as pd
 
-from typing import TypeVar, Generic, Optional, Union, Any, TypedDict
+from typing import TypeVar, Generic, Optional, Any, TypedDict
 from dataclasses import dataclass
 
 
 T = TypeVar("T")
 
 class ClassifierCache(TypedDict):
-    logits: np.ndarray
+    logits: dict[str, list[np.ndarray]]
 
 class FeatureExtractorCache(TypedDict):
-    index: dict[str, torch.Tensor]
-    eval_dataset: dict[str, torch.Tensor]
+    index: pd.DataFrame
+    eval_dataset: pd.DataFrame
 
 
 @dataclass
@@ -60,15 +61,15 @@ class CacheManager(Generic[T]):
                     **(metadata or {})
                 }
             }
-            torch.save(payload, path)
+            with open(path, "wb") as f:
+                pickle.dump(payload, f, protocol=pickle.HIGHEST_PROTOCOL)
         except Exception:
             print(f"ERROR - CacheManager - {traceback.format_exc()}")
 
     @classmethod
     def load(
         cls,
-        path: str,
-        device: Union[str, torch.device] = "cpu"
+        path: str
     ) -> "CacheManager[T]":
         """
         Load and validate cache file.
@@ -76,7 +77,8 @@ class CacheManager(Generic[T]):
         if not os.path.exists(path):
             raise FileNotFoundError(path)
 
-        payload = torch.load(path, map_location=device, weights_only=False)
+        with open(path, "rb") as f:
+            payload = pickle.load(f)
 
         if "cache" not in payload:
             raise ValueError("Invalid cache structure.")

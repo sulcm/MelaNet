@@ -394,7 +394,7 @@ def classifier_predict(
         cached_values = CacheManager[ClassifierCache].load(
             path=eval_args.load_cached_model_inference
         )
-        predictions = cached_values.cache["predictions"]
+        predictions = cached_values.cache["logits"]
     else:
         predictions = run_inference(
             model=model,
@@ -413,7 +413,7 @@ def classifier_predict(
             CacheManager.save(
                 path=eval_args.cache_model_inference,
                 cache={
-                    "predictions": predictions
+                    "logits": predictions
                 },
                 metadata={
                     "eval_dataset": {
@@ -424,6 +424,7 @@ def classifier_predict(
                     "model": eval_args.model_name_or_path,
                     "classification_task": eval_args.classification_task,
                     "is_feature_extractor": eval_args.eval_as_feature_extraction,
+                    "tta_transforms": eval_args.test_time_augmentations or eval_args.apply_augmentations
                 }
             )
 
@@ -491,10 +492,9 @@ def feature_extraction_predict(
         cached_values = CacheManager[FeatureExtractorCache].load(
             path=eval_args.load_cached_model_inference
         )
-        features_columns = list(cached_values.cache["index"].keys())
-        for ft_col in features_columns:
-            index = index.add_column(ft_col, cached_values.cache["index"][ft_col])
-            dataset = dataset.add_column(ft_col, cached_values.cache["eval_dataset"][ft_col])
+        index_extracted_features = cached_values.cache["index"]
+        eval_extracted_features = cached_values.cache["eval_dataset"]
+        features_columns = cached_values.metadata["features_columns"]
     else:
         index_extracted_features = run_inference(
             model=model,
@@ -562,14 +562,8 @@ def feature_extraction_predict(
             CacheManager.save(
                 path=eval_args.cache_model_inference,
                 cache={
-                    "index": {
-                        ft_col: index_extracted_features[ft_col].to_list()
-                        for ft_col in features_columns
-                    },
-                    "eval_dataset": {
-                        ft_col: eval_extracted_features[ft_col].to_list()
-                        for ft_col in features_columns
-                    },
+                    "index": index_extracted_features,
+                    "eval_dataset": eval_extracted_features
                 },
                 metadata={
                     "datasets": {
@@ -591,7 +585,10 @@ def feature_extraction_predict(
                         "zero_shot_config": kwargs2cli(**model.zero_shot_config.model_dump()),
                         "classification_task": eval_args.classification_task,
                         "is_feature_extractor": eval_args.eval_as_feature_extraction,
-                    }
+                    },
+                    "features_columns": features_columns,
+                    "index_transforms": eval_args.index_augmentations or eval_args.apply_augmentations,
+                    "tta_transforms": eval_args.test_time_augmentations or eval_args.apply_augmentations
                 }
             )
 
