@@ -30,7 +30,6 @@ class OpenCLIPWrapper():
 
         if isinstance(image, torch.Tensor):
             image_tensor_proc = self.image_processor(image)
-            # Add batch dimension if a single image
             image_tensor_proc = image_tensor_proc.unsqueeze(0) if image_tensor_proc.ndim == 3 else image_tensor_proc
         else:
             image = make_flat_list_of_images(image)

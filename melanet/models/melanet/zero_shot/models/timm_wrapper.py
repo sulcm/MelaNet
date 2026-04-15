@@ -3,7 +3,7 @@ import torch
 
 from typing import Optional
 
-from timm.data import resolve_data_config, create_transform
+from timm.data import resolve_model_data_config, create_transform
 
 from ..config import ZeroShotConfig, create_default_zero_shot_config
 from ...embeddings.utils import normalize_embeddings
@@ -24,12 +24,10 @@ class TimmModelWrapper():
             global_pool=self.config.global_pool,
             pretrained_strict=False
         )
-        self.model = self.model.eval().to(self.device)
+        self.model.eval().to(self.device)
 
-        model_config = resolve_data_config(
-            pretrained_cfg=self.model.pretrained_cfg if hasattr(self.model, "pretrained_cfg") else self.model.default_cfg,
-            args=None,
-            model=None,
+        model_config = resolve_model_data_config(
+            self.model,
             use_test_size=True
         )
         self.image_processor = create_transform(
@@ -47,7 +45,6 @@ class TimmModelWrapper():
 
         if isinstance(image, torch.Tensor):
             image_tensor_proc = self.image_processor(image)
-            # Add batch dimension if a single image
             image_tensor_proc = image_tensor_proc.unsqueeze(0) if image_tensor_proc.ndim == 3 else image_tensor_proc
         else:
             image = make_flat_list_of_images(image)
