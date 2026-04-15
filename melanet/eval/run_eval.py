@@ -154,7 +154,7 @@ class EvaluateArguments:
     )
     vector_store_config: Optional[str] = field(
         default=None,
-        metadata={"help": "Used for configuring vector stores."}
+        metadata={"help": "Used for configuring vector stores and reranking strategies (for example when using RRF)."}
     )
     batch_size: int = field(
         default=8,
@@ -326,14 +326,21 @@ def load_and_validate_dataset(dataset_name: str, eval_args: EvaluateArguments, d
 def get_labels(dataset: Dataset, model: MelaNet, eval_args: EvaluateArguments) -> Optional[list[str]]:
     label_column = eval_args.label_column_name
     if label_column is not None:
-        if label_column not in dataset.column_names:
+        if label_column in dataset.column_names:
+            labels = dataset.features[label_column].names
+        elif not eval_args.eval_as_feature_extraction:
+            logger.warning(
+                f"--label_column_name {label_column} not found in dataset '{eval_args.dataset_name}'. "
+                "Make sure to set `--label_column_name` to the correct label column "
+                f"(one of {', '.join(dataset.column_names)}). No metrics will be computed."
+            )
+            labels = model.get_labels()
+        else:
             raise ValueError(
                 f"--label_column_name {label_column} not found in dataset '{eval_args.dataset_name}'. "
-                "Make sure to set `--label_column_name` to the correct text column - one of "
+                "Make sure to set `--label_column_name` to the correct label column - one of "
                 f"{', '.join(dataset.column_names)} - or remove it and skip metrics computations (no ground truth)."
             )
-
-        labels = dataset.features[label_column].names
     else:
         labels = model.get_labels()
     return labels
@@ -428,6 +435,9 @@ def classifier_predict(
                 }
             )
 
+    rerank_config = VectorStoreConfig.from_cli(eval_args.vector_store_config) if eval_args.vector_store_config is not None else create_default_vector_store_config()
+    logger.info(f"Classification with resolution strategy {eval_args.prediction_resolution_strategy}")
+    logger.info(f"Rerank config {rerank_config}")
     final_preds = {}
     final_probs = {}
     for lesion_id, pred_logits in predictions.items():
@@ -445,6 +455,21 @@ def classifier_predict(
             mean_probs = np.mean(pred_probs, axis=0)
             prediction = mean_probs.argmax()
             _probs = mean_probs
+        elif eval_args.prediction_resolution_strategy == "rrf":
+            # majority voting
+            ranked_preds = np.fliplr(pred_probs.argsort(axis=1))[:, :rerank_config.top_k]
+            rrf_preds = reciprocal_rank_fusion(
+                results=ranked_preds.tolist(),
+                top_n=rerank_config.rerank_top_n,
+                k=rerank_config.rrf_k,
+                items_have_scores=False
+            )
+            prediction = rrf_preds[0]
+            _pred_probs = pred_probs[
+                np.logical_or.reduce(ranked_preds == prediction, axis=1)
+            ]
+            reranked_sample_id, _ = np.unravel_index(_pred_probs.argmax(), _pred_probs.shape)
+            _probs = _pred_probs[reranked_sample_id]
         else:
             prediction = -1
             _probs = np.array([])
@@ -891,6 +916,8 @@ def evaluate(eval_args: EvaluateArguments):
         else:
             results["index_augmentations"] = eval_args.index_augmentations
             results["test_time_augmentations"] = eval_args.test_time_augmentations
+    else:
+        results["test_time_augmentations"] = eval_args.apply_augmentations or eval_args.test_time_augmentations
 
     logger.info(f"Saving final results to file {eval_args.results_path}")
     with open(eval_args.results_path, "w") as f:
