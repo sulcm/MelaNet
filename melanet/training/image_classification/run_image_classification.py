@@ -23,7 +23,6 @@ from dataclasses import dataclass, field
 from functools import partial
 from collections import Counter
 
-from PIL import Image
 from datasets import load_dataset, load_from_disk
 
 from torchvision.transforms import (
@@ -104,12 +103,6 @@ MODEL_CONFIG_CLASSES = list(MODEL_FOR_IMAGE_CLASSIFICATION_MAPPING.keys())
 MODEL_TYPES = tuple(conf.model_type for conf in MODEL_CONFIG_CLASSES)
 
 
-def pil_loader(path: str) -> Image.Image:
-    with open(path, "rb") as f:
-        im = Image.open(f)
-        return im.convert("RGB")
-
-
 # TODO: Monkey patch - Fixes missing configuration of parameter `pretrained`. Default behavior `pretrained=False`
 def _create_timm_model_with_error_handling_override(config: "TimmWrapperConfig", **model_kwargs):
     """
@@ -156,7 +149,7 @@ class DataTrainingArguments:
     train_dir: Optional[str] = field(default=None, metadata={"help": "A folder containing the training data."})
     validation_dir: Optional[str] = field(default=None, metadata={"help": "A folder containing the validation data."})
     train_val_split: Optional[float] = field(
-        default=0.1, metadata={"help": "Percent to split off of train for validation."}
+        default=None, metadata={"help": "Percent to split off of train for validation."}
     )
     max_train_samples: Optional[int] = field(
         default=None,
@@ -199,7 +192,6 @@ class ModelArguments:
     """
 
     model_name_or_path: str = field(
-        default="google/vit-base-patch16-224-in21k",
         metadata={"help": "Path to pretrained model or model identifier from huggingface.co/models"},
     )
     model_type: Optional[str] = field(
@@ -565,10 +557,9 @@ def main(args: Optional[dict[str, Any]] = None):
     # Input expects `EvalPrediction` object (a namedtuple with a `predictions` and `label_ids` field)
     # Output has to be a dictionary string to float
     def compute_metrics(p):
-        """Computes accuracy on a batch of predictions"""
+        """Computes metrics on a batch of predictions"""
         logits = torch.tensor(p.predictions)
         target = torch.tensor(p.label_ids)
-        # preds = torch.argmax(logits, dim=-1)
         probs = F.softmax(logits, dim=-1)
 
         results = {

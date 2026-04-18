@@ -33,7 +33,6 @@ from melanet.embeddings.types import MELANET_FEATURES_PREFIX
 from melanet.vectorstores import VectorStoreConfig, create_default_vector_store_config, MultiNNClassifier, NNClassifier
 from melanet.vectorstores.rrf import reciprocal_rank_fusion
 from melanet.zero_shot.augmentations import build_view_transformations
-from melanet.functional.softmax import softmax
 from melanet.utils import tensor2value, kwargs2cli
 from melanet.inference import run_inference
 from formatter.isic import format_isic_submission
@@ -59,7 +58,12 @@ class EvaluateArguments:
     dataset_name: str = field(
         metadata={"help": "Name of a dataset from the hub (could be your own, possibly private dataset hosted on the hub)."},
     )
-    results_path: str = field(
+    run_inference_only: bool = field(
+        default=False,
+        metadata={"help": "Run only inference on given dataset. Useful for caching/saving infered values. Defaults to `False`."}
+    )
+    results_path: Optional[str] = field(
+        default=None,
         metadata={"help": "Path and file where to save results. Must be JSON file."}
     )
     model_name_or_path: Optional[str] = field(
@@ -76,11 +80,11 @@ class EvaluateArguments:
     )
     load_cached_model_inference: Optional[str] = field(
         default=None,
-        metadata={"help": "Provide path from where to load cached infered values from model."},
+        metadata={"help": "Provide path from where to load cached infered values from model. Using `CacheManager` so assume pickled file."},
     )
     cache_model_inference: Optional[str] = field(
         default=None,
-        metadata={"help": "Provide path where to store / cache infered values from model."},
+        metadata={"help": "Provide path where to store / cache infered values from model. Using `CacheManager` so assume pickled file."},
     )
     isic_submission_path: Optional[str] = field(
         default=None,
@@ -134,23 +138,17 @@ class EvaluateArguments:
         default=None,
         metadata={"help": "Use augmentations during test time. Defaults to `None` -> off. Can be 'all' or list of augmentations in format 'augment_1,augment_2,...'."}
     )
-    feature_adapter: Optional[Literal["pca", "linear", "fusion"]] = field(
+    ft_model_adapter_name: Optional[str] = field(
         default=None,
-        metadata={"help": (
-            "Create adapter that will be used for transforming extracted features. Possible options:"
-            " - 'pca': Initialize PCA adapter that will select N components (lower dimension)"
-            " - 'linear': Initialize simple linear projection layer that will simply transform embedding of one size to another"
-            " - 'fusion': Initialize MLP that will combine embeddings from 2 models into single representation"
-            )
-        }
+        metadata={"help": "Path to pretrained feature adapter for fine-tuned model in format `<adapter_type>---<adapter_path>`."}
     )
-    feature_adapter_path: Optional[str] = field(
+    zero_shot_model_adapter_name: Optional[str] = field(
         default=None,
-        metadata={"help": "Provide path from or where feature adapter will be loaded and/or saved."}
+        metadata={"help": "Path to pretrained feature adapter for zero-shot model in format `<adapter_type>---<adapter_path>`."}
     )
-    feature_adapter_config: Optional[str] = field(
+    models_fusion_adapter_name: Optional[str] = field(
         default=None,
-        metadata={"help": "Used for configuring adapters."}
+        metadata={"help": "Path to pretrained feature adapter that will fuse outputs from models in format `<adapter_type>---<adapter_path>`."}
     )
     vector_store_config: Optional[str] = field(
         default=None,
@@ -398,6 +396,7 @@ def classifier_predict(
     tta_transforms: Optional[list[Callable[[torch.Tensor], torch.Tensor]]] = None
 ) -> dict[str, int]:
     if eval_args.load_cached_model_inference and os.path.isfile(eval_args.load_cached_model_inference):
+        logger.info(f"Loading cached logits from {eval_args.load_cached_model_inference}")
         cached_values = CacheManager[ClassifierCache].load(
             path=eval_args.load_cached_model_inference
         )
@@ -417,6 +416,7 @@ def classifier_predict(
         )
 
         if eval_args.cache_model_inference:
+            logger.info(f"Saving infered logits to {eval_args.cache_model_inference}")
             CacheManager.save(
                 path=eval_args.cache_model_inference,
                 cache={
@@ -435,29 +435,33 @@ def classifier_predict(
                 }
             )
 
+    if eval_args.run_inference_only:
+        logger.info("Inference is complete. Terminating program ...")
+        sys.exit(0)
+
     rerank_config = VectorStoreConfig.from_cli(eval_args.vector_store_config) if eval_args.vector_store_config is not None else create_default_vector_store_config()
     logger.info(f"Classification with resolution strategy {eval_args.prediction_resolution_strategy}")
     logger.info(f"Rerank config {rerank_config}")
     final_preds = {}
-    final_probs = {}
+    final_logits = {}
     for lesion_id, pred_logits in predictions.items():
-        pred_probs = softmax(pred_logits, axis=-1)
+        pred_logits = np.asarray(pred_logits)
         if eval_args.prediction_resolution_strategy == "greedy":
-            sample_type_id, prediction = np.unravel_index(pred_probs.argmax(), pred_probs.shape)
-            _probs = pred_probs[sample_type_id]
+            sample_type_id, prediction = np.unravel_index(pred_logits.argmax(), pred_logits.shape)
+            _logits = pred_logits[sample_type_id]
         elif eval_args.prediction_resolution_strategy == "first":
-            prediction = pred_probs[0].argmax()
-            _probs = pred_probs[0]
+            prediction = pred_logits[0].argmax()
+            _logits = pred_logits[0]
         elif eval_args.prediction_resolution_strategy == "last":
-            prediction = pred_probs[-1].argmax()
-            _probs = pred_probs[-1]
+            prediction = pred_logits[-1].argmax()
+            _logits = pred_logits[-1]
         elif eval_args.prediction_resolution_strategy == "mean":
-            mean_probs = np.mean(pred_probs, axis=0)
-            prediction = mean_probs.argmax()
-            _probs = mean_probs
+            mean_logits = np.mean(pred_logits, axis=0)
+            prediction = mean_logits.argmax()
+            _logits = mean_logits
         elif eval_args.prediction_resolution_strategy == "rrf":
             # majority voting
-            ranked_preds = np.fliplr(pred_probs.argsort(axis=1))[:, :rerank_config.top_k]
+            ranked_preds = np.fliplr(pred_logits.argsort(axis=1))[:, :rerank_config.top_k]
             rrf_preds = reciprocal_rank_fusion(
                 results=ranked_preds.tolist(),
                 top_n=rerank_config.rerank_top_n,
@@ -465,17 +469,17 @@ def classifier_predict(
                 items_have_scores=False
             )
             prediction = rrf_preds[0]
-            _pred_probs = pred_probs[
+            _pred_logits = pred_logits[
                 np.logical_or.reduce(ranked_preds == prediction, axis=1)
             ]
-            reranked_sample_id, _ = np.unravel_index(_pred_probs.argmax(), _pred_probs.shape)
-            _probs = _pred_probs[reranked_sample_id]
+            reranked_sample_id, _ = np.unravel_index(_pred_logits.argmax(), _pred_logits.shape)
+            _logits = _pred_logits[reranked_sample_id]
         else:
             prediction = -1
-            _probs = np.array([])
+            _logits = np.array([])
         final_preds[lesion_id] = int(prediction)
         if metrics is not None:
-            final_probs[lesion_id] = _probs
+            final_logits[lesion_id] = _logits
 
     if metrics is not None:
         logger.info("Computing metrics")
@@ -491,14 +495,14 @@ def classifier_predict(
         if mapped_labels["prediction"].hasnans:
             return final_preds
         mapped_labels["prediction"] = mapped_labels["prediction"].astype(int)
-        mapped_labels["prob"] = mapped_labels[eval_args.id_column_name].map(final_probs)
+        mapped_labels["logits"] = mapped_labels[eval_args.id_column_name].map(final_logits)
 
         metrics_update_state(
-            predictions=np.asarray(mapped_labels["prob"].to_list()),
+            predictions=np.asarray(mapped_labels["logits"].to_list()),
             label_ids=mapped_labels[eval_args.label_column_name].to_list(),
             metrics=metrics,
             classification_task=eval_args.classification_task,
-            predictions_type="probs"
+            predictions_type="logits"
         )
 
     return final_preds
@@ -514,6 +518,7 @@ def feature_extraction_predict(
     tta_transforms: Optional[list[Callable[[torch.Tensor], torch.Tensor]]] = None
 ) -> dict[str, int]:
     if eval_args.load_cached_model_inference and os.path.isfile(eval_args.load_cached_model_inference):
+        logger.info(f"Loading cached features from {eval_args.load_cached_model_inference}")
         cached_values = CacheManager[FeatureExtractorCache].load(
             path=eval_args.load_cached_model_inference
         )
@@ -575,15 +580,11 @@ def feature_extraction_predict(
                 eval_extracted_features
             ).explode().reset_index(name=MELANET_FEATURES_PREFIX).rename(columns={"index": eval_args.id_column_name})
 
-        index_extracted_features[eval_args.label_column_name] = index_extracted_features[eval_args.id_column_name].map({
-            id: label
-            for id, label in zip(index[eval_args.id_column_name], index[eval_args.label_column_name])
-        })
-
         features_columns = [col for col in index_extracted_features.columns if col.startswith(MELANET_FEATURES_PREFIX)]
         assert features_columns, "Can not find extracted features"
 
         if eval_args.cache_model_inference:
+            logger.info(f"Saving infered features to {eval_args.cache_model_inference}")
             CacheManager.save(
                 path=eval_args.cache_model_inference,
                 cache={
@@ -616,6 +617,16 @@ def feature_extraction_predict(
                     "tta_transforms": eval_args.test_time_augmentations or eval_args.apply_augmentations
                 }
             )
+
+    if eval_args.run_inference_only:
+        logger.info("Inference is complete. Terminating program ...")
+        sys.exit(0)
+
+    # Map ground truths to extracted features
+    index_extracted_features[eval_args.label_column_name] = index_extracted_features[eval_args.id_column_name].map({
+        id: label
+        for id, label in zip(index[eval_args.id_column_name], index[eval_args.label_column_name])
+    })
 
     vector_store_config = VectorStoreConfig.from_cli(eval_args.vector_store_config) if eval_args.vector_store_config is not None else create_default_vector_store_config()
     logger.info(f"Vector store config {vector_store_config}")
@@ -772,6 +783,10 @@ def evaluate(eval_args: EvaluateArguments):
         log_level = eval_args.default_log_level.upper()
     logger.setLevel(log_level)
 
+    if eval_args.run_inference_only:
+        logger.info("Running model inference only")
+    else:
+        logger.info("Running evaluation")
     logger.info(f"Evaluation parameters {eval_args}")
 
     # Prepare and load dataset
@@ -824,6 +839,9 @@ def evaluate(eval_args: EvaluateArguments):
         feature_extractor_config=FeatureExtractorConfig.from_cli(eval_args.feature_extractor_config) if eval_args.feature_extractor_config is not None else None,
         zero_shot_model_name=eval_args.zero_shot_model_name_or_path,
         zero_shot_config=ZeroShotConfig.from_cli(eval_args.zero_shot_config) if eval_args.zero_shot_config is not None else None,
+        ft_model_adapter_name=eval_args.ft_model_adapter_name,
+        zero_shot_model_adapter_name=eval_args.zero_shot_model_adapter_name,
+        models_fusion_adapter_name=eval_args.models_fusion_adapter_name,
         device=eval_args.device
     )
 

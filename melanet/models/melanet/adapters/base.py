@@ -2,6 +2,10 @@ from typing import Literal
 from abc import ABC, abstractmethod
 
 from .config import FeatureAdapterConfig
+from .types import AdapterOutput
+
+
+ADAPTER_TYPES = ("pca", "linear", "fusion")
 
 
 class BaseAdapter(ABC):
@@ -13,7 +17,7 @@ class BaseAdapter(ABC):
         ...
 
     @abstractmethod
-    def forward(self, *args, **kwargs):
+    def forward(self, *args, **kwargs) -> AdapterOutput:
         ...
 
     @classmethod
@@ -29,3 +33,16 @@ class BaseAdapter(ABC):
     @abstractmethod
     def save_as_pretrained(self, save_path: str, allow_overwrite: bool = True) -> None:
         ...
+
+
+class DummyNonLearnableAdapter(ABC):
+    """Dummy implementations of some `torch.nn.Module` methods"""
+
+    def to(self, *args, **kwargs):
+        return self
+
+    def train(self, *args, **kwargs):
+        return self
+
+    def eval(self, *args, **kwargs):
+        return self

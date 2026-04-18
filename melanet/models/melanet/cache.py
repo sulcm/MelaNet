@@ -17,6 +17,8 @@ class FeatureExtractorCache(TypedDict):
     index: pd.DataFrame
     eval_dataset: pd.DataFrame
 
+MetadataType = dict[str, Any]
+
 
 @dataclass
 class CacheManager(Generic[T]):
@@ -26,19 +28,19 @@ class CacheManager(Generic[T]):
     Internal structure:
     {
         "cache": T,
-        "metadata": dict[str, Any]
+        "metadata": MetadataType
     }
     """
 
     _cache: T
-    _metadata: dict[str, Any]
+    _metadata: MetadataType
 
     @property
     def cache(self) -> T:
         return self._cache
 
     @property
-    def metadata(self) -> dict[str, Any]:
+    def metadata(self) -> MetadataType:
         return self._metadata
 
     @staticmethod
@@ -46,7 +48,7 @@ class CacheManager(Generic[T]):
         *,
         path: str,
         cache: T,
-        metadata: Optional[dict[str, Any]] = None
+        metadata: Optional[MetadataType] = None
     ) -> None:
         """
         Save arbitrary cache object and optional metadata.

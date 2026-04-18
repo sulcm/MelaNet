@@ -2,7 +2,7 @@ import torch
 import numpy as np
 import pandas as pd
 
-from typing import Any, Callable, Union
+from typing import Any, Callable, Union, Literal
 from tqdm import tqdm
 from collections import defaultdict
 
@@ -10,8 +10,9 @@ from torch.utils.data import DataLoader
 from datasets import Dataset
 
 from .melanet_wrapper import MelaNet
-from .utils import tensor2numpy
+from .embeddings.types import FeatureExtractorOutput, MELANET_FEATURES_PREFIX
 from .zero_shot.augmentations import create_views_batched
+from .utils import tensor2numpy
 
 
 class InferenceDataCollator():
@@ -105,3 +106,36 @@ def run_inference(
                 for lesion_id, output in zip(lesion_ids, outputs):
                     predictions[str(lesion_id)].append(output)
     return predictions
+
+
+def output_to_dataframe(
+    output: dict[str, Union[list[np.ndarray], list[pd.DataFrame]]],
+    id_column_name: str,
+    output_type: Literal["features", "object", "logits", "probs"],
+) -> pd.DataFrame:
+    if output_type == "object":
+        pd_output = pd.concat(output.values(), ignore_index=True)
+
+        _feature_names = FeatureExtractorOutput.get_feature_names()
+        _to_drop = []
+        _to_rename = []
+        for f_name in _feature_names:
+            if pd_output[f_name].hasnans:
+                _to_drop.append(f_name)
+            else:
+                _to_rename.append(f_name)
+
+        if _to_drop:
+            pd_output = pd_output.drop(columns=_to_drop)
+        if _to_rename:
+            pd_output = pd_output.rename(
+                columns={f_name: f"{MELANET_FEATURES_PREFIX}_{f_name}" for f_name in _to_rename}
+            )
+    elif output_type in ("features", "logits", "probs"):
+        values_name = MELANET_FEATURES_PREFIX if output_type == "features" else output_type
+        pd_output = pd.Series(
+            output
+        ).explode().reset_index(name=values_name).rename(columns={"index": id_column_name})
+    else:
+        raise ValueError(f"Unsupported output type {output_type}")
+    return pd_output

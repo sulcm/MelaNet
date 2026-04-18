@@ -6,6 +6,8 @@ import torch.nn.functional as F
 
 from .learnable_base import LearnableAdapter
 from .config import FeatureAdapterConfig
+from .types import AdapterOutput
+from ..utils import handle_existing_path
 
 
 class FusionAdapter(LearnableAdapter):
@@ -81,16 +83,15 @@ class FusionAdapter(LearnableAdapter):
 
         self._is_fitted = False
 
-    def forward(self, input_features: list[torch.Tensor]) -> torch.Tensor:
-        assert self.training or self._is_fitted, "FusionAdapter is not fitted. Call `fit()` first."
-        assert len(input_features) == self.__num_inputs, f"Must passed same number of input as is initialized number of input projections, {len(input_features)} != {self.__num_inputs}"
+    def forward(self, features: list[torch.Tensor], **kwargs) -> AdapterOutput:
+        assert len(features) == self.__num_inputs, f"Must passed same number of input as is initialized number of input projections, {len(features)} != {self.__num_inputs}"
 
         # Input projections into common hidden dim
         projected_inputs = []
-        for features, input_projection in zip(input_features, self.input_projections):
+        for in_features, input_projection in zip(features, self.input_projections):
             if self.input_l2_norm:
-                features = F.normalize(features, p=2, dim=-1)
-            h_input = input_projection(features)
+                in_features = F.normalize(in_features, p=2, dim=-1)
+            h_input = input_projection(in_features)
             projected_inputs.append(h_input)
 
         # Fuse projected input into hidden dim
@@ -117,13 +118,16 @@ class FusionAdapter(LearnableAdapter):
         if self.output_l2_norm:
             z_fused = F.normalize(z_fused, p=2, dim=-1)
 
-        return z_fused
+        return AdapterOutput(adapter_output=z_fused)
 
     def save_as_pretrained(self, save_path: str, allow_overwrite: bool = True) -> None:
-        os.makedirs(os.path.dirname(save_path), exist_ok=allow_overwrite)
+        if not allow_overwrite:
+            save_path = handle_existing_path(save_path)
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
         torch.save(
             {
                 "state_dict": self.state_dict(),
+                "adapter_type": self.adapter_type,
                 "config": {
                     "input_dims": self.__input_dims,
                     "hidden_dim": self.__hidden_dim,
@@ -155,5 +159,5 @@ class FusionAdapter(LearnableAdapter):
             "input_l2_norm": config.input_l2_norm,
             "output_l2_norm": config.output_l2_norm
         }
-        init_kwargs = {k: v for k, v in init_kwargs if v is not None}
+        init_kwargs = {k: v for k, v in init_kwargs.items() if v is not None}
         return cls(**init_kwargs)
