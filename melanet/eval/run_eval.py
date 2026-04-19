@@ -33,6 +33,7 @@ from melanet.embeddings.types import MELANET_FEATURES_PREFIX
 from melanet.vectorstores import VectorStoreConfig, create_default_vector_store_config, MultiNNClassifier, NNClassifier
 from melanet.vectorstores.rrf import reciprocal_rank_fusion
 from melanet.zero_shot.augmentations import build_view_transformations
+from melanet.functional.softmax import softmax
 from melanet.utils import tensor2value, kwargs2cli
 from melanet.inference import run_inference
 from formatter.isic import format_isic_submission
@@ -74,7 +75,9 @@ class EvaluateArguments:
         default=None,
         metadata={"help": "Path to pre-trained zero-shot model or model identifier from huggingface.co/models. Only used when `feature_classification` is active."},
     )
-    prediction_resolution_strategy: Literal["greedy", "rrf", "first", "last", "mean"] = field(
+    prediction_resolution_strategy: Literal[
+        "greedy", "rrf", "first", "last", "mean", "greedy_logits", "mean_logits", "rrf_logits"
+    ] = field(
         default="greedy",
         metadata={"help": "Strategy how to resolve predictions that have same ID or when using TTA transform strategies during evaluation."},
     )
@@ -443,25 +446,29 @@ def classifier_predict(
     logger.info(f"Classification with resolution strategy {eval_args.prediction_resolution_strategy}")
     logger.info(f"Rerank config {rerank_config}")
     final_preds = {}
-    final_logits = {}
+    final_probs = {}
     for lesion_id, pred_logits in predictions.items():
         pred_logits = np.asarray(pred_logits)
-        if eval_args.prediction_resolution_strategy == "greedy":
-            sample_type_id, prediction = np.unravel_index(pred_logits.argmax(), pred_logits.shape)
-            _logits = pred_logits[sample_type_id]
+        pred_probs = softmax(pred_logits, axis=-1)
+        if eval_args.prediction_resolution_strategy in ("greedy", "greedy_logits"):
+            _pred_vals = pred_probs if eval_args.prediction_resolution_strategy == "greedy" else pred_logits
+            sample_type_id, prediction = np.unravel_index(_pred_vals.argmax(), _pred_vals.shape)
+            _probs = pred_probs[sample_type_id]
         elif eval_args.prediction_resolution_strategy == "first":
-            prediction = pred_logits[0].argmax()
-            _logits = pred_logits[0]
+            _probs = pred_probs[0]
+            prediction = _probs.argmax()
         elif eval_args.prediction_resolution_strategy == "last":
-            prediction = pred_logits[-1].argmax()
-            _logits = pred_logits[-1]
-        elif eval_args.prediction_resolution_strategy == "mean":
-            mean_logits = np.mean(pred_logits, axis=0)
-            prediction = mean_logits.argmax()
-            _logits = mean_logits
-        elif eval_args.prediction_resolution_strategy == "rrf":
+            _probs = pred_probs[-1]
+            prediction = _probs.argmax()
+        elif eval_args.prediction_resolution_strategy in ("mean", "mean_logits"):
+            _pred_vals = pred_probs if eval_args.prediction_resolution_strategy == "mean" else pred_logits
+            _mean_vals = np.mean(_pred_vals, axis=0)
+            prediction = _mean_vals.argmax()
+            _probs = np.mean(pred_probs, axis=0)
+        elif eval_args.prediction_resolution_strategy in ("rrf", "rrf_logits"):
             # majority voting
-            ranked_preds = np.fliplr(pred_logits.argsort(axis=1))[:, :rerank_config.top_k]
+            _pred_vals = pred_probs if eval_args.prediction_resolution_strategy == "rrf" else pred_logits
+            ranked_preds = np.fliplr(_pred_vals.argsort(axis=1))[:, :rerank_config.top_k]
             rrf_preds = reciprocal_rank_fusion(
                 results=ranked_preds.tolist(),
                 top_n=rerank_config.rerank_top_n,
@@ -469,17 +476,17 @@ def classifier_predict(
                 items_have_scores=False
             )
             prediction = rrf_preds[0]
-            _pred_logits = pred_logits[
+            _pred_probs_selected = pred_probs[
                 np.logical_or.reduce(ranked_preds == prediction, axis=1)
             ]
-            reranked_sample_id, _ = np.unravel_index(_pred_logits.argmax(), _pred_logits.shape)
-            _logits = _pred_logits[reranked_sample_id]
+            reranked_sample_id, _ = np.unravel_index(_pred_probs_selected.argmax(), _pred_probs_selected.shape)
+            _probs = _pred_probs_selected[reranked_sample_id]
         else:
             prediction = -1
-            _logits = np.array([])
+            _probs = np.array([])
         final_preds[lesion_id] = int(prediction)
         if metrics is not None:
-            final_logits[lesion_id] = _logits
+            final_probs[lesion_id] = _probs
 
     if metrics is not None:
         logger.info("Computing metrics")
@@ -495,14 +502,14 @@ def classifier_predict(
         if mapped_labels["prediction"].hasnans:
             return final_preds
         mapped_labels["prediction"] = mapped_labels["prediction"].astype(int)
-        mapped_labels["logits"] = mapped_labels[eval_args.id_column_name].map(final_logits)
+        mapped_labels["probs"] = mapped_labels[eval_args.id_column_name].map(final_probs)
 
         metrics_update_state(
-            predictions=np.asarray(mapped_labels["logits"].to_list()),
+            predictions=np.asarray(mapped_labels["probs"].to_list()),
             label_ids=mapped_labels[eval_args.label_column_name].to_list(),
             metrics=metrics,
             classification_task=eval_args.classification_task,
-            predictions_type="logits"
+            predictions_type="probs"
         )
 
     return final_preds
@@ -831,6 +838,13 @@ def evaluate(eval_args: EvaluateArguments):
             dataset_split=eval_args.eval_split
         )
         logger.info(f"Loaded eval dataset {dataset}")
+
+    if eval_args.eval_as_feature_extraction:
+        if eval_args.prediction_resolution_strategy.endswith("_logits"):
+            eval_args.prediction_resolution_strategy = eval_args.prediction_resolution_strategy.rstrip("_logits")
+            logger.warning(
+                f"During feature extraction can not use logits for prediction resolution. Using classic variant {eval_args.prediction_resolution_strategy}"
+            )
 
     # Init model
     model = MelaNet(
