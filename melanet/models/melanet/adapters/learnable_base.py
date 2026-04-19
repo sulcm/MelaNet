@@ -91,7 +91,6 @@ class LearnableAdapter(nn.Module, BaseAdapter):
         # Training
         if training_args.do_train:
             train_result = trainer.train()
-            # trainer.save_model()
             trainer.log_metrics("train", train_result.metrics)
 
         # Evaluation

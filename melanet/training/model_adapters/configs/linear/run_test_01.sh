@@ -1,7 +1,7 @@
 python run_model_adapters_training.py \
     --adapter_output_path /home/sulcm/models/melanet/adapters/test_DermLIP_lin_probe.pt \
     --adapter_type linear \
-    --adapter_config "in_features=512,out_features=11,input_norm=True,dropout=0.5" \
+    --adapter_config "in_features=512,out_features=11,dropout=0.1" \
     --dataset_name /home/sulcm/datasets/milk10k/MILK10k_DermLIP_features \
     --feature_column_names melanet_features_zero_shot_embeddings \
     --label_column_name label \
@@ -11,14 +11,15 @@ python run_model_adapters_training.py \
     --num_train_epochs 30 \
     --learning_rate 1e-3 \
     --lr_scheduler_type constant \
+    --warmup_ratio 0.1 \
     --weight_decay 1e-6 \
-    --per_device_train_batch_size 64 \
-    --per_device_eval_batch_size 128 \
+    --per_device_train_batch_size 32 \
+    --per_device_eval_batch_size 256 \
     --gradient_accumulation_steps 1 \
     --logging_strategy steps \
-    --logging_steps 100 \
+    --logging_steps 200 \
     --eval_strategy steps \
-    --eval_steps 500 \
+    --eval_steps 1000 \
     --save_strategy steps \
     --save_steps 5000 \
     --save_total_limit 2 \
