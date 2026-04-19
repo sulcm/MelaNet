@@ -1,0 +1,34 @@
+python run_model_adapters_training.py \
+    --adapter_output_path /home/sulcm/models/melanet/adapters/test_DermLIP_lin_probe.pt \
+    --adapter_type linear \
+    --adapter_config "in_features=512,out_features=11,input_norm=True,dropout=0.5" \
+    --dataset_name /home/sulcm/datasets/milk10k/MILK10k_DermLIP_features \
+    --feature_column_names melanet_features_zero_shot_embeddings \
+    --label_column_name label \
+    --task multiclass \
+    --remove_unused_columns False \
+    --overwrite_output_dir \
+    --num_train_epochs 30 \
+    --learning_rate 1e-3 \
+    --lr_scheduler_type constant \
+    --weight_decay 1e-6 \
+    --per_device_train_batch_size 64 \
+    --per_device_eval_batch_size 128 \
+    --gradient_accumulation_steps 1 \
+    --logging_strategy steps \
+    --logging_steps 100 \
+    --eval_strategy steps \
+    --eval_steps 500 \
+    --save_strategy steps \
+    --save_steps 5000 \
+    --save_total_limit 2 \
+    --load_best_model_at_end True \
+    --metric_for_best_model eval_loss \
+    --greater_is_better False \
+    --do_train \
+    --do_eval \
+    --fp16 \
+    --report_to tensorboard \
+    --logging_dir ./tensorboard_logs/Linear-Adapters \
+    --dataloader_num_workers 4 \
+    --seed 42

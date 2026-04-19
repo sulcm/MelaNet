@@ -607,8 +607,8 @@ def feature_extraction_predict(
                     "models": {
                         "ft_model": eval_args.model_name_or_path,
                         "zero_shot_model": eval_args.model_name_or_path,
-                        "feature_extractor_config": kwargs2cli(**model.feature_extractor_config.model_dump()),
-                        "zero_shot_config": kwargs2cli(**model.zero_shot_config.model_dump()),
+                        "feature_extractor_config": kwargs2cli(**model.feature_extractor_config.model_dump()) if model.feature_extractor_config is not None else None,
+                        "zero_shot_config": kwargs2cli(**model.zero_shot_config.model_dump()) if model.zero_shot_config is not None else None,
                         "classification_task": eval_args.classification_task,
                         "is_feature_extractor": eval_args.eval_as_feature_extraction,
                     },

@@ -1,5 +1,6 @@
 __pycache__
 wandb
+tensorboard_logs
 test.ipynb
 trainer_output
 .ipynb_checkpoints

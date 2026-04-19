@@ -18,15 +18,27 @@ class LinearAdapter(LearnableAdapter):
         in_features: int,
         out_features: int,
         bias: bool = True,
+        dropout: float = 0.0,
+        input_norm: bool = False,
         input_l2_norm: bool = False,
         output_l2_norm: bool = False
     ):
         super(LinearAdapter, self).__init__()
 
-        self.projection = nn.Linear(
-            in_features=in_features,
-            out_features=out_features,
-            bias=bias
+        self.__in_features = in_features
+        self.__out_features = out_features
+        self.__bias = bias
+        self.__dropout = dropout
+        self.__input_norm = input_norm
+
+        self.projection = nn.Sequential(
+            nn.LayerNorm(in_features) if input_norm else nn.Identity(),
+            nn.Dropout(dropout),
+            nn.Linear(
+                in_features=in_features,
+                out_features=out_features,
+                bias=bias
+            )
         )
 
         self.input_l2_norm = input_l2_norm
@@ -53,9 +65,11 @@ class LinearAdapter(LearnableAdapter):
                 "state_dict": self.state_dict(),
                 "adapter_type": self.adapter_type,
                 "config": {
-                    "in_features": self.projection.in_features,
-                    "out_features": self.projection.out_features,
-                    "bias": self.projection.bias is not None,
+                    "in_features": self.__in_features,
+                    "out_features": self.__out_features,
+                    "bias": self.__bias,
+                    "dropout": self.__dropout,
+                    "input_norm": self.__input_norm,
                     "input_l2_norm": self.input_l2_norm,
                     "output_l2_norm": self.output_l2_norm
                 }
@@ -70,6 +84,8 @@ class LinearAdapter(LearnableAdapter):
             "in_features": config.in_features,
             "out_features": config.out_features,
             "bias": config.bias,
+            "dropout": config.dropout,
+            "input_norm": config.input_norm,
             "input_l2_norm": config.input_l2_norm,
             "output_l2_norm": config.output_l2_norm
         }

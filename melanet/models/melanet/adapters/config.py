@@ -8,6 +8,7 @@ class FeatureAdapterConfig(BaseModel):
     bias: Optional[bool] = Field(default=None)
     input_l2_norm: Optional[bool] = Field(default=None)
     output_l2_norm: Optional[bool] = Field(default=None)
+    input_norm: Optional[bool] = Field(default=None)
     whiten: Optional[bool] = Field(default=None)
     hidden_dim: Optional[int] = Field(default=None)
     dropout: Optional[float] = Field(default=None)

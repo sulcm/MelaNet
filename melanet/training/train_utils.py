@@ -1,11 +1,18 @@
 import ast
+import string
 import inspect
+import secrets
 
 from typing import get_origin, get_args, Union, Any
 from enum import Enum
+from datetime import datetime, UTC
 
 from torch.optim.optimizer import Optimizer, ParamsT
 from transformers import TrainerCallback
+
+
+INTERPRET_TRUE = {"1", "true", "yes", "on", "y", "t"}
+INTERPRET_NONE = {"", "None", "none", "null", None}
 
 
 class TrainerPhaseDetectorCallback(TrainerCallback):
@@ -39,10 +46,6 @@ class TrainerPhaseDetectorCallback(TrainerCallback):
 
     def on_evaluate(self, args, state, control, **kwargs):
         self.__phase_from_trainer_control(control)
-
-
-INTERPRET_TRUE = {"1", "true", "yes", "on", "y", "t"}
-INTERPRET_NONE = {"", "None", "none", "null", None}
 
 
 def equal_types(a, b) -> bool:
@@ -192,3 +195,27 @@ def parse_kwargs_from_cli(str_kwargs: str, func = None) -> dict[str, Any]:
         return infer_typed_kwargs(func, _str_kwargs)
     else:
         return _str_kwargs
+
+
+def generate_id(length: int = 8, as_datetime: bool = False) -> str:
+    """Generate a random string of `length` given all ASCII letters (upper and lower case) and digits."""
+    if as_datetime:
+        return datetime.now(tz=UTC).strftime("%Y%m%d_%H%M%S")
+    else:
+        _chars = string.ascii_letters + string.digits
+        return "".join(secrets.choice(_chars) for _ in range(length))
+
+
+def check_report_to_integration(integration: str, reporters: Union[list[str], str, None]) -> bool:
+    if not reporters:
+        return False
+
+    if not isinstance(reporters, list):
+        reporters = [reporters,]
+
+    if reporters == ["none"]:
+        return False
+    elif reporters == ["all"]:
+        return True
+    else:
+        return integration in reporters

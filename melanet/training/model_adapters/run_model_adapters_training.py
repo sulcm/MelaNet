@@ -38,6 +38,7 @@ if __name__ == "__main__":
     # Script is run directly
     from loss_functions import FocalLoss, SupConLoss, SeesawLoss
     from metacentrum_utils import load_dataset_from_scratch, DATASET_SCRATCH_PREFIX
+    from train_utils import generate_id, check_report_to_integration
     from melanet.adapters import (
         ADAPTER_TYPES,
         AdapterWrapper,
@@ -48,6 +49,7 @@ else:
     # Script is being imported or used from different location
     from .loss_functions import FocalLoss, SupConLoss, SeesawLoss
     from .metacentrum_utils import load_dataset_from_scratch, DATASET_SCRATCH_PREFIX
+    from .train_utils import generate_id, check_report_to_integration
     from .melanet.adapters import (
         ADAPTER_TYPES,
         AdapterWrapper,
@@ -105,10 +107,6 @@ class DataTrainingArguments:
     label_column_name: str = field(
         default="label",
         metadata={"help": "The name of the dataset column containing the labels. Defaults to 'label'."},
-    )
-    shuffle: bool = field(
-        default=True,
-        metadata={"help": "Sets shuffle parameter for the data loader."},
     )
     cache_dir: Optional[str] = field(
         default=None, metadata={"help": "Where do you want to store the pretrained models downloaded from s3"}
@@ -533,9 +531,16 @@ def main(args: Optional[dict[str, Any]] = None):
         return loss
 
     if model_args.adapter_name_or_path is not None:
+        logger.info(f"Initializing adapter from path {model_args.adapter_name_or_path}")
         adapter_model = AdapterWrapper.from_pretrained(model_args.adapter_name_or_path)
     elif model_args.adapter_type is not None and model_args.adapter_config is not None:
-        adapter_config = FeatureAdapterConfig.from_cli(model_args.adapter_config)
+        try:
+            logger.info("Initializing adapter from `adapter_config`. Trying to load if as JSON ...")
+            _adapter_config_kwargs = json.loads(model_args.adapter_config)
+            adapter_config = FeatureAdapterConfig(**_adapter_config_kwargs)
+        except Exception:
+            logger.info("Loading `adapter_config` as JSON failed falling back to CLI style kwargs")
+            adapter_config = FeatureAdapterConfig.from_cli(model_args.adapter_config)
         adapter_model = AdapterWrapper.from_config(
             adapter_type=model_args.adapter_type,
             config=adapter_config
@@ -568,6 +573,13 @@ def main(args: Optional[dict[str, Any]] = None):
     else:
         optimizer_cls_and_kwargs = None
     logger.info(f"Using optimizer {optimizer_cls_and_kwargs}")
+
+    if isinstance(adapter_model, LearnableAdapter) and check_report_to_integration("tensorboard", training_args.report_to):
+        if training_args.logging_dir is not None:
+            training_args.logging_dir = os.path.join(training_args.logging_dir, f"run_{generate_id(as_datetime=True)}_{generate_id()}")
+        logger.info(
+            f"Logging to TensorBoard: {training_args.logging_dir if training_args.logging_dir is not None else "Default HF location"}"
+        )
 
     # Training
     logger.info(f"Starting training of `{adapter_model.adapter_type}` adapter")
