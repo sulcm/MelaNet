@@ -34,12 +34,16 @@ class LinearAdapter(LearnableAdapter):
         self.projection = nn.Sequential(
             nn.LayerNorm(in_features) if input_norm else nn.Identity(),
             nn.Dropout(dropout),
-            nn.Linear(
-                in_features=in_features,
-                out_features=out_features,
-                bias=bias
-            )
         )
+        _linear = nn.Linear(
+            in_features=in_features,
+            out_features=out_features,
+            bias=bias
+        )
+        nn.init.trunc_normal_(_linear.weight, std=0.01)
+        if bias:
+            nn.init.zeros_(_linear.bias)
+        self.projection.append(_linear)
 
         self.input_l2_norm = input_l2_norm
         self.output_l2_norm = output_l2_norm

@@ -1,7 +1,7 @@
 python run_model_adapters_training.py \
-    --adapter_output_path /home/sulcm/models/melanet/adapters/test_ResNet50_DermLIP_fusion.pt \
+    --adapter_output_path /home/sulcm/models/melanet/adapters/test_ResNet50_DermLIP_fusion_attn.pt \
     --adapter_type fusion \
-    --adapter_config "{\"in_features\":[2048,512],\"out_features\":11,\"use_attn\":true}" \
+    --adapter_config "{\"in_features\":[2048,512],\"out_features\":11,\"use_attn\":true,\"input_norm\":true,\"dropout\":0.5,\"modality_dropout\":0.5,\"attn_dropout\":0.0}" \
     --dataset_name /home/sulcm/datasets/milk10k/MILK10k_ResNet50_DermLIP_features \
     --feature_column_names "melanet_features_ft_embeddings,melanet_features_zero_shot_embeddings" \
     --label_column_name label \
@@ -9,11 +9,12 @@ python run_model_adapters_training.py \
     --remove_unused_columns False \
     --overwrite_output_dir \
     --num_train_epochs 30 \
-    --learning_rate 1e-3 \
-    --lr_scheduler_type constant \
-    --weight_decay 1e-6 \
-    --per_device_train_batch_size 64 \
-    --per_device_eval_batch_size 128 \
+    --learning_rate 5e-6 \
+    --lr_scheduler_type constant_with_warmup \
+    --warmup_ratio 0.1 \
+    --weight_decay 1e-3 \
+    --per_device_train_batch_size 32 \
+    --per_device_eval_batch_size 256 \
     --gradient_accumulation_steps 1 \
     --logging_strategy steps \
     --logging_steps 100 \
@@ -29,6 +30,6 @@ python run_model_adapters_training.py \
     --do_eval \
     --fp16 \
     --report_to tensorboard \
-    --logging_dir ./tensorboard_logs/Fusion-Adapters \
+    --logging_dir ./tensorboard_logs/Fusion-Attn-Adapters \
     --dataloader_num_workers 4 \
     --seed 42

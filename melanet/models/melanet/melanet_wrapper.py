@@ -33,8 +33,13 @@ class MelaNet():
     ):
         self.device = resolve_device(device)
         self.is_feature_extractor = is_feature_extractor
+        self.has_adapters = (
+            ft_model_adapter_name is not None or
+            zero_shot_model_adapter_name is not None or
+            models_fusion_adapter_name is not None
+        )
 
-        if self.is_feature_extractor:
+        if self.is_feature_extractor or self.has_adapters:
             assert model_name is not None or zero_shot_model_name is not None, "At least one of `model_name` or `zero_shot_model_name` must be provided"
             self.__feature_extractor_config = feature_extractor_config if feature_extractor_config is not None else create_default_feature_extractor_config()
             if model_name is not None:
@@ -64,6 +69,12 @@ class MelaNet():
                     self.models_fusion_adapter.eval().to(self.device)
             else:
                 self.models_fusion_adapter = None
+
+            if self.has_adapters and self.models_fusion_adapter is None:
+                if self.ft_model is not None:
+                    assert self.ft_model_adapter is not None, "When using fine-tuned model with adapetrs you must provide one in `ft_model_adapter_name`"
+                if self.zero_shot_model is not None:
+                    assert self.zero_shot_model_adapter is not None, "When using fine-tuned model with adapetrs you must provide one in `zero_shot_model_adapter_name`"
         else:
             assert model_name is not None, "For classification must specify fine-tuned model name using `model_name` parameter"
             self.image_processor = AutoImageProcessor.from_pretrained(model_name)
@@ -72,6 +83,8 @@ class MelaNet():
 
     def get_labels(self) -> Optional[list[str]]:
         if self.is_feature_extractor:
+            return None
+        elif self.has_adapters:
             return None
         else:
             # Each model initialized from `AutoModelForImageClassification` has config `PreTrainedConfig` with `label2id` attribute
@@ -88,7 +101,7 @@ class MelaNet():
 
     @property
     def zero_shot_config(self) -> Optional[ZeroShotConfig]:
-        if self.is_feature_extractor:
+        if self.is_feature_extractor or self.has_adapters:
             if self.zero_shot_model is not None:
                 return self.zero_shot_model.config
             else:
@@ -101,6 +114,49 @@ class MelaNet():
         outputs = self.model(**inputs)
 
         logits = outputs.logits
+        if return_logits:
+            return tensor2numpy(logits)
+        else:
+            predicted_class_idx = tensor2numpy(logits.argmax(-1))
+            return predicted_class_idx
+
+    def forward_with_adapters(self, image, return_logits: bool = False, text = None, **kwargs) -> np.ndarray:
+        if self.ft_model is not None:
+            ft_embeds = self.ft_model.extract_features(image=image)
+        else:
+            ft_embeds = None
+
+        if self.zero_shot_model is not None:
+            zero_shot_embeds = self.zero_shot_model.extract_features(image=image, text=text)
+        else:
+            zero_shot_embeds = None
+
+        if ft_embeds is not None and self.ft_model_adapter is not None:
+            ft_model_adapter_output = self.ft_model_adapter.forward(ft_embeds)
+            ft_embeds = ft_model_adapter_output.adapter_output
+        if zero_shot_embeds is not None and self.zero_shot_model_adapter is not None:
+            zero_shot_model_adapter_output = self.zero_shot_model_adapter.forward(zero_shot_embeds)
+            zero_shot_embeds = zero_shot_model_adapter_output.adapter_output
+
+        if (
+            (ft_embeds is not None and zero_shot_embeds is not None)
+            and
+            self.models_fusion_adapter is not None
+        ):
+            models_fusion_adapter_output = self.models_fusion_adapter.forward([
+                ft_embeds,
+                zero_shot_embeds
+            ])
+            logits = models_fusion_adapter_output.adapter_output
+        elif ft_embeds is not None and self.ft_model_adapter is not None:
+            logits = ft_embeds
+        elif zero_shot_embeds is not None and self.zero_shot_model_adapter is not None:
+            logits = zero_shot_embeds
+        else:
+            raise ValueError(
+                "Error while extracting logits. Check your model inicialization."
+            )
+
         if return_logits:
             return tensor2numpy(logits)
         else:
@@ -163,6 +219,12 @@ class MelaNet():
         if self.is_feature_extractor:
             return self.extract_features(
                 image=image,
+                text=text
+            )
+        elif self.has_adapters:
+            return self.forward_with_adapters(
+                image=image,
+                return_logits=return_logits,
                 text=text
             )
         else:

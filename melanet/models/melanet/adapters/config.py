@@ -12,6 +12,7 @@ class FeatureAdapterConfig(BaseModel):
     whiten: Optional[bool] = Field(default=None)
     hidden_dim: Optional[int] = Field(default=None)
     dropout: Optional[float] = Field(default=None)
+    modality_dropout: Optional[float] = Field(default=None)
     hidden_act: Optional[str] = Field(default=None)
     use_attn: Optional[bool] = Field(default=None)
     attn_num_heads: Optional[int] = Field(default=None)

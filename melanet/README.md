@@ -13,9 +13,14 @@ For more information about used models check this [README](./models/README.md)
 ---
 
 ## Training
+
 ### Image classification
 - multiclass classification task
 - [directory](./training/image_classification/) with training script and configs
+
+### Model Adapters
+- fine-tune adapters for freezed feature encoders
+- [directory](./training/model_adapters/) with training script and configs
 
 ---
 

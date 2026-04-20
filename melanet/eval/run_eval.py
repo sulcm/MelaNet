@@ -431,9 +431,17 @@ def classifier_predict(
                         "split": eval_args.eval_split,
                         "size": None
                     },
-                    "model": eval_args.model_name_or_path,
+                    "ft_model": eval_args.model_name_or_path,
+                    "zero_shot_model": eval_args.zero_shot_model_name_or_path,
+                    "adapters": {
+                        "ft_model_adapter": eval_args.ft_model_adapter_name,
+                        "zero_shot_model_adapter_name": eval_args.zero_shot_model_adapter_name,
+                        "models_fusion_adapter_name": eval_args.models_fusion_adapter_name
+                    },
                     "classification_task": eval_args.classification_task,
                     "is_feature_extractor": eval_args.eval_as_feature_extraction,
+                    "zero_shot_config": kwargs2cli(**model.zero_shot_config.model_dump()) if model.zero_shot_config is not None else None,
+                    "feature_extractor_config": kwargs2cli(**model.feature_extractor_config.model_dump()) if model.feature_extractor_config is not None else None,
                     "tta_transforms": eval_args.test_time_augmentations or eval_args.apply_augmentations
                 }
             )
@@ -614,6 +622,11 @@ def feature_extraction_predict(
                     "models": {
                         "ft_model": eval_args.model_name_or_path,
                         "zero_shot_model": eval_args.model_name_or_path,
+                        "adapters": {
+                            "ft_model_adapter": eval_args.ft_model_adapter_name,
+                            "zero_shot_model_adapter_name": eval_args.zero_shot_model_adapter_name,
+                            "models_fusion_adapter_name": eval_args.models_fusion_adapter_name
+                        },
                         "feature_extractor_config": kwargs2cli(**model.feature_extractor_config.model_dump()) if model.feature_extractor_config is not None else None,
                         "zero_shot_config": kwargs2cli(**model.zero_shot_config.model_dump()) if model.zero_shot_config is not None else None,
                         "classification_task": eval_args.classification_task,
@@ -918,6 +931,11 @@ def evaluate(eval_args: EvaluateArguments):
         "datetime": datetime.now().isoformat(),
         "model": eval_args.model_name_or_path,
         "zero_shot_model": eval_args.zero_shot_model_name_or_path,
+        "adapters": {
+            "ft_model_adapter": eval_args.ft_model_adapter_name,
+            "zero_shot_model_adapter_name": eval_args.zero_shot_model_adapter_name,
+            "models_fusion_adapter_name": eval_args.models_fusion_adapter_name
+        },
         "dataset": {
             "name": eval_args.dataset_name,
             "split": eval_args.eval_split

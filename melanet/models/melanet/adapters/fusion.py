@@ -20,8 +20,9 @@ class FusionAdapter(LearnableAdapter):
         use_attn: bool = False,
         attn_num_heads: int = 8,
         attn_dropout: float = 0.0,
-        hidden_dim: int = 1024,
+        hidden_dim: int = 512,
         dropout: float = 0.1,
+        modality_dropout: float = 0.1,
         hidden_act: str = "gelu",
         input_norm: bool = False,
         input_l2_norm: bool = False,
@@ -40,6 +41,7 @@ class FusionAdapter(LearnableAdapter):
         self.__dropout = dropout
         self.__input_norm = input_norm
         self.__num_inputs = len(input_dims)
+        self.__modality_dropout = modality_dropout
 
         self.input_projections = nn.ModuleList([
             nn.Sequential(
@@ -52,20 +54,35 @@ class FusionAdapter(LearnableAdapter):
             )
             for i_dim in input_dims
         ])
+        # Learnable modality scaling
+        self.modality_scale = nn.Parameter(
+            torch.ones(self.__num_inputs)
+        )
 
         if self.__use_attn:
-            self.input_pos_embed = nn.Parameter(
+            self.input_pos_embed = nn.Parameter( # Modality (feature encoder) embeddings
                 torch.randn(1, self.__num_inputs, hidden_dim)
             )
             self.fusion_query = nn.Parameter( # CLS token
                 torch.randn(1, 1, hidden_dim)
             )
-            self.attn_norm = nn.LayerNorm(hidden_dim)
+            nn.init.trunc_normal_(self.input_pos_embed, std=0.02)
+            nn.init.trunc_normal_(self.fusion_query, std=0.02)
+
+            self.q_norm = nn.LayerNorm(hidden_dim)
+            self.kv_norm = nn.LayerNorm(hidden_dim)
             self.attn_fusion = nn.MultiheadAttention(
                 embed_dim=hidden_dim,
                 num_heads=attn_num_heads,
                 dropout=attn_dropout,
                 batch_first=True
+            )
+            self.attn_ffn_norm = nn.LayerNorm(hidden_dim)
+            self.attn_ffn = nn.Sequential(
+                nn.Linear(hidden_dim, hidden_dim * 4),
+                self.activation_str2fn[self.__hidden_act](),
+                nn.Dropout(dropout),
+                nn.Linear(hidden_dim * 4, hidden_dim),
             )
         else:
             self.concat_fusion = nn.Sequential(
@@ -73,8 +90,10 @@ class FusionAdapter(LearnableAdapter):
                 self.activation_str2fn[self.__hidden_act](),
                 nn.Dropout(dropout),
                 nn.Linear(hidden_dim * 2, hidden_dim),
+                self.activation_str2fn[self.__hidden_act](),
                 nn.LayerNorm(hidden_dim),
             )
+            self.residual_proj = nn.Linear(hidden_dim, hidden_dim)
 
         self.final_projection = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim),
@@ -97,20 +116,30 @@ class FusionAdapter(LearnableAdapter):
         for in_features, input_projection in zip(features, self.input_projections):
             if self.input_l2_norm:
                 in_features = F.normalize(in_features, p=2, dim=-1)
+            if self.training and torch.rand(1, device=in_features.device) < self.__modality_dropout:
+                # Modality dropout
+                in_features = torch.zeros_like(in_features)
+
             h_input = input_projection(in_features)
             projected_inputs.append(h_input)
 
         # Fuse projected input into hidden dim
-        H = torch.stack(projected_inputs, dim=1) # (B, N, D)
+        H = torch.stack(projected_inputs, dim=1) # (B, N inputs, D)
+        H = H * self.modality_scale.view(1, -1, 1) # Apply modality scaling
+
         if self.__use_attn:
             H = H + self.input_pos_embed # Add positional embeddings of inputs
             Q = self.fusion_query.expand(H.shape[0], -1, -1) # Add CLS token that will have fused features
-            H_attn, _ = self.attn_fusion(Q, H, H)
-            h_fused = self.attn_norm(H_attn.squeeze(1))
+            Q_norm = self.q_norm(Q)
+            H_norm = self.kv_norm(H)
+            attn_out, _ = self.attn_fusion(Q_norm, H_norm, H_norm)
+            Q = Q + attn_out
+            Q = Q + self.attn_ffn(self.attn_ffn_norm(Q))
+            h_fused = Q.squeeze(1)
         else:
             H_flat = H.reshape(H.shape[0], -1) # (B, N * D)
             H_concat = self.concat_fusion(H_flat)
-            H_residual = H.mean(dim=1)
+            H_residual = self.residual_proj(H.mean(dim=1))
             h_fused = H_concat + H_residual
 
         # Final (output) projection into desired dim
@@ -137,6 +166,7 @@ class FusionAdapter(LearnableAdapter):
                     "use_attn": self.__use_attn,
                     "attn_num_heads": self.__attn_num_heads,
                     "attn_dropout": self.__attn_dropout,
+                    "modality_dropout": self.__modality_dropout,
                     "input_norm": self.__input_norm,
                     "input_l2_norm": self.input_l2_norm,
                     "output_l2_norm": self.output_l2_norm
@@ -157,6 +187,7 @@ class FusionAdapter(LearnableAdapter):
             "use_attn": config.use_attn,
             "attn_num_heads": config.attn_num_heads,
             "attn_dropout": config.attn_dropout,
+            "modality_dropout": config.modality_dropout,
             "input_norm": config.input_norm,
             "input_l2_norm": config.input_l2_norm,
             "output_l2_norm": config.output_l2_norm

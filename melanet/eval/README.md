@@ -17,3 +17,8 @@ Then create run by
 ```bash
 bash scripts/*.sh
 ```
+
+---
+
+Further examples and options can be found in `.vscode/launch.json` configurations starting with `Evaluate`.
+These configurations can be easily launched via VSCode in `Run and Debug` tab.
