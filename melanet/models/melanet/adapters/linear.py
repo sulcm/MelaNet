@@ -40,7 +40,7 @@ class LinearAdapter(LearnableAdapter):
             out_features=out_features,
             bias=bias
         )
-        nn.init.trunc_normal_(_linear.weight, std=0.01)
+        nn.init.trunc_normal_(_linear.weight, std=0.02)
         if bias:
             nn.init.zeros_(_linear.bias)
         self.projection.append(_linear)

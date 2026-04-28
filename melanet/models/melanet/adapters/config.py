@@ -17,6 +17,8 @@ class FeatureAdapterConfig(BaseModel):
     use_attn: Optional[bool] = Field(default=None)
     attn_num_heads: Optional[int] = Field(default=None)
     attn_dropout: Optional[float] = Field(default=None)
+    drop_path_rate: Optional[float] = Field(default=None)
+    drop_path_mode: Optional[str] = Field(default=None)
     seed: Optional[int] = Field(default=42)
 
     @classmethod
