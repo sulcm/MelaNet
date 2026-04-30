@@ -34,6 +34,7 @@ def build_view_transformations(
     return {
         "center_crop": partial(center_crop, area_perc=center_crop_area_perc),
         "horizontal_flip": F_torch_augmentation.horizontal_flip,
+        "vertical_flip": F_torch_augmentation.vertical_flip,
         **{
             f"rotate_{angle}": partial(
                 F_torch_augmentation.rotate,

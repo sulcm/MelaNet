@@ -1,5 +1,7 @@
-MODEL_NAME="resnet"
+MODEL_NAME="resnet_ham10000"
 MODEL_PATH="/home/sulcm/models/melanet/resnet50/melanet_resnet50_fine_grid-n5511yzn"
+
+DATASET_PATH="/home/sulcm/datasets/ham10000/HAM10000"
 
 PREDICTION_STRATEGY="greedy"
 BATCH_SIZE=128
@@ -7,7 +9,7 @@ BATCH_SIZE=128
 OUTPUT_DIR="./outputs/${MODEL_NAME}"
 mkdir -p "$OUTPUT_DIR"
 
-AUGMENTATIONS=("none" "center_crop" "horizontal_flip" "vertical_flip" "rotate_15" "rotate_90" "rotate_270" "rotate_345" "all")
+AUGMENTATIONS=("center_crop" "horizontal_flip" "vertical_flip" "rotate_15" "rotate_90" "rotate_270" "rotate_345" "all")
 DO_TTA=(false true)
 for augment in "${AUGMENTATIONS[@]}"; do
     # With Index augment
@@ -25,9 +27,9 @@ for augment in "${AUGMENTATIONS[@]}"; do
             --classification_task "multiclass" \
             --eval_as_feature_extraction True \
             --model_name_or_path "${MODEL_PATH}" \
-            --dataset_name "/home/sulcm/datasets/milk10k/SpilledMILK10k" \
+            --dataset_name "${DATASET_PATH}" \
             --eval_split "validation" \
-            --index_name "/home/sulcm/datasets/milk10k/SpilledMILK10k" \
+            --index_name "${DATASET_PATH}" \
             --index_split "train" \
             --id_column_name "lesion_id" \
             --label_column_name "label" \
@@ -49,9 +51,9 @@ for augment in "${AUGMENTATIONS[@]}"; do
         --classification_task "multiclass" \
         --eval_as_feature_extraction True \
         --model_name_or_path "${MODEL_PATH}" \
-        --dataset_name "/home/sulcm/datasets/milk10k/SpilledMILK10k" \
+        --dataset_name "${DATASET_PATH}" \
         --eval_split "validation" \
-        --index_name "/home/sulcm/datasets/milk10k/SpilledMILK10k" \
+        --index_name "${DATASET_PATH}" \
         --index_split "train" \
         --id_column_name "lesion_id" \
         --label_column_name "label" \
@@ -63,3 +65,25 @@ for augment in "${AUGMENTATIONS[@]}"; do
         --index_augmentations "none" \
         --test_time_augmentations "${tta}"
 done
+
+# Baseline without augments
+OUTPUT_PATH="${OUTPUT_DIR}/result_${PREDICTION_STRATEGY}_none.json"
+echo "Processing baseline (without augment) -> $OUTPUT_PATH"
+
+python run_eval.py \
+    --classification_task "multiclass" \
+    --eval_as_feature_extraction True \
+    --model_name_or_path "${MODEL_PATH}" \
+    --dataset_name "${DATASET_PATH}" \
+    --eval_split "validation" \
+    --index_name "${DATASET_PATH}" \
+    --index_split "train" \
+    --id_column_name "lesion_id" \
+    --label_column_name "label" \
+    --prediction_resolution_strategy "${PREDICTION_STRATEGY}" \
+    --results_path "${OUTPUT_PATH}" \
+    --batch_size $BATCH_SIZE \
+    --feature_extractor_config "normalize_output=True" \
+    --vector_store_config "metric=ip" \
+    --index_augmentations "none" \
+    --test_time_augmentations "none"

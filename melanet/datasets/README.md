@@ -5,6 +5,15 @@
 ## Image classification
 - multiclass labeled datasets
 
+### HAM10000 (ISIC 2018)
+- Based on __ISIC 2018__ dataset
+    - Train == __HAM10000__ ~= 10015
+    - Validation ~= 193 samples
+    - Test ~= 1512
+- Created "__HAM10000__"
+    - Train == __HAM10000__ ~= 10015
+    - Validation == Validation + Test ~= 1705
+
 ### ISIC 2019
 - Train
     - Includes __HAM10000__, __BCN20000__, __MSK__ datasets

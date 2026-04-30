@@ -1,7 +1,7 @@
 import torch
 import numpy as np
 
-from typing import Optional, Union
+from typing import Optional, Union, Callable
 
 from transformers import AutoImageProcessor, AutoModelForImageClassification
 
@@ -29,6 +29,7 @@ class MelaNet():
         ft_model_adapter_name: Optional[str] = None,
         zero_shot_model_adapter_name: Optional[str] = None,
         models_fusion_adapter_name: Optional[str] = None,
+        prediction_mapping: Optional[Callable[[np.ndarray], np.ndarray]] = None,
         device: str = "cuda"
     ):
         self.device = resolve_device(device)
@@ -38,6 +39,7 @@ class MelaNet():
             zero_shot_model_adapter_name is not None or
             models_fusion_adapter_name is not None
         )
+        self.prediction_mapping = prediction_mapping
 
         if self.is_feature_extractor or self.has_adapters:
             assert model_name is not None or zero_shot_model_name is not None, "At least one of `model_name` or `zero_shot_model_name` must be provided"
@@ -113,11 +115,14 @@ class MelaNet():
         inputs = self.image_processor(images=image, return_tensors="pt").to(self.device)
         outputs = self.model(**inputs)
 
-        logits = outputs.logits
+        logits = tensor2numpy(outputs.logits)
+        if self.prediction_mapping is not None:
+            logits = self.prediction_mapping(logits)
+
         if return_logits:
-            return tensor2numpy(logits)
+            return logits
         else:
-            predicted_class_idx = tensor2numpy(logits.argmax(-1))
+            predicted_class_idx = logits.argmax(-1)
             return predicted_class_idx
 
     def forward_with_adapters(self, image, return_logits: bool = False, text = None, **kwargs) -> np.ndarray:

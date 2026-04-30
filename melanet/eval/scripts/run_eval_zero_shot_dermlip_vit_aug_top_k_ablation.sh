@@ -10,7 +10,7 @@ BATCH_SIZE=128
 OUTPUT_DIR="./outputs/${MODEL_NAME}"
 mkdir -p "$OUTPUT_DIR"
 
-AUGMENTATIONS=("none" "center_crop" "horizontal_flip" "rotate_15" "rotate_90" "rotate_270" "rotate_345" "all")
+AUGMENTATIONS=("none" "center_crop" "horizontal_flip" "vertical_flip" "rotate_15" "rotate_90" "rotate_270" "rotate_345" "all")
 for augment in "${AUGMENTATIONS[@]}"; do
     OUTPUT_PATH="${OUTPUT_DIR}/result_top_k_unique_${RETRIEVE_UNIQUE_ONLY}_${PREDICTION_STRATEGY}_${augment}.json"
     tta="none"

@@ -33,6 +33,7 @@ from melanet.embeddings.types import MELANET_FEATURES_PREFIX
 from melanet.vectorstores import VectorStoreConfig, create_default_vector_store_config, MultiNNClassifier, NNClassifier
 from melanet.vectorstores.rrf import reciprocal_rank_fusion
 from melanet.zero_shot.augmentations import build_view_transformations
+from melanet.mapping import convert_milk10k2ham10000_preds
 from melanet.functional.softmax import softmax
 from melanet.utils import tensor2value, kwargs2cli
 from melanet.inference import run_inference
@@ -859,6 +860,11 @@ def evaluate(eval_args: EvaluateArguments):
                 f"During feature extraction can not use logits for prediction resolution. Using classic variant {eval_args.prediction_resolution_strategy}"
             )
 
+    if not eval_args.eval_as_feature_extraction and "ham10000" in eval_args.dataset_name.lower():
+        prediction_mapping = convert_milk10k2ham10000_preds
+    else:
+        prediction_mapping = None
+
     # Init model
     model = MelaNet(
         model_name=eval_args.model_name_or_path,
@@ -869,6 +875,7 @@ def evaluate(eval_args: EvaluateArguments):
         ft_model_adapter_name=eval_args.ft_model_adapter_name,
         zero_shot_model_adapter_name=eval_args.zero_shot_model_adapter_name,
         models_fusion_adapter_name=eval_args.models_fusion_adapter_name,
+        prediction_mapping=prediction_mapping,
         device=eval_args.device
     )
 
