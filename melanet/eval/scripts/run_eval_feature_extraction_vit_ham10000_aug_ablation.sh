@@ -1,5 +1,6 @@
 MODEL_NAME="vit_ham10000"
-MODEL_PATH="/home/sulcm/models/melanet/vit_base/melanet_vit_base_fine_grid-dxjjru4m"
+# MODEL_PATH="/home/sulcm/models/melanet/vit_base/melanet_vit_base_fine_grid-dxjjru4m"
+MODEL_PATH="metacentrum_scratch/melanet_vit_base_fine_grid-dxjjru4m"
 
 # DATASET_PATH="/home/sulcm/datasets/ham10000/HAM10000"
 DATASET_PATH="metacentrum_scratch/HAM10000"

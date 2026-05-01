@@ -867,16 +867,17 @@ def evaluate(eval_args: EvaluateArguments):
         prediction_mapping = None
 
     # Resolve model paths if stored on scratch
-    if eval_args.model_name_or_path.startswith(METACENTRUM_SCRATCH_PREFIX):
+    if eval_args.model_name_or_path and eval_args.model_name_or_path.startswith(METACENTRUM_SCRATCH_PREFIX):
         _model_name_or_path = resolve_model_scratch_path(eval_args.model_name_or_path)
     else:
         _model_name_or_path = eval_args.model_name_or_path
-    if eval_args.zero_shot_model_name_or_path.startswith(METACENTRUM_SCRATCH_PREFIX):
+    if eval_args.zero_shot_model_name_or_path and eval_args.zero_shot_model_name_or_path.startswith(METACENTRUM_SCRATCH_PREFIX):
         _zero_shot_model_name_or_path = resolve_model_scratch_path(eval_args.zero_shot_model_name_or_path)
     else:
         _zero_shot_model_name_or_path = eval_args.zero_shot_model_name_or_path
 
     # Init model
+    logger.info(f"Initializing MelaNet with: {_model_name_or_path} and {_zero_shot_model_name_or_path}")
     model = MelaNet(
         model_name=_model_name_or_path,
         is_feature_extractor=eval_args.eval_as_feature_extraction,
