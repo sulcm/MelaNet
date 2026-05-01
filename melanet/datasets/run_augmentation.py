@@ -14,7 +14,7 @@ from datasets.combine import concatenate_datasets
 
 from torchvision.transforms import v2 as torch_augmentation
 
-from metacentrum_utils import DATASET_SCRATCH_PREFIX, load_dataset_from_scratch
+from metacentrum_utils import METACENTRUM_SCRATCH_PREFIX, load_dataset_from_scratch
 
 
 logger = logging.getLogger(__name__)
@@ -148,7 +148,7 @@ def augment_dataset(augment_args: DataAugmentationArguments):
         dataset = load_from_disk(
             dataset_path=augment_args.dataset_name
         )
-    elif augment_args.dataset_name.startswith(DATASET_SCRATCH_PREFIX):
+    elif augment_args.dataset_name.startswith(METACENTRUM_SCRATCH_PREFIX):
         # Load from scratch directory on Metacentrum
         logger.info(f"Loading dataset {augment_args.dataset_name} from scratch storage")
         dataset = load_dataset_from_scratch(

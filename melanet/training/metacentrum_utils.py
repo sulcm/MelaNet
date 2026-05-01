@@ -9,7 +9,7 @@ from datasets import load_from_disk, Dataset, DatasetDict
 
 
 METACENTRUM_SCRATCH_PATH: Optional[str] = os.getenv("SCRATCHDIR")
-DATASET_SCRATCH_PREFIX = "metacentrum_scratch"
+METACENTRUM_SCRATCH_PREFIX = "metacentrum_scratch"
 
 
 def copy_data_dir_to_scratch(dir_path: str) -> Optional[str]:
@@ -47,7 +47,7 @@ def ls_scratch(path: str = "") -> None:
 
 
 def load_dataset_from_scratch(dataset_name: str) -> Union[Dataset, DatasetDict, None]:
-    if dataset_name.startswith(DATASET_SCRATCH_PREFIX):
+    if dataset_name.startswith(METACENTRUM_SCRATCH_PREFIX):
         _path_on_scratch = os.path.normpath(dataset_name).split(os.path.sep, maxsplit=1)[1]
         _dataset_scratch = os.path.join(METACENTRUM_SCRATCH_PATH, _path_on_scratch)
         return load_from_disk(_dataset_scratch)
@@ -55,3 +55,16 @@ def load_dataset_from_scratch(dataset_name: str) -> Union[Dataset, DatasetDict, 
         return load_from_disk(dataset_name)
     else:
         return None
+
+
+def resolve_model_scratch_path(model_path: str) -> str:
+    if model_path.startswith(METACENTRUM_SCRATCH_PREFIX):
+        _path_on_scratch = os.path.normpath(model_path).split(os.path.sep, maxsplit=1)[1]
+        _model_scratch = os.path.join(METACENTRUM_SCRATCH_PATH, _path_on_scratch)
+        return _model_scratch
+    elif model_path.startswith(METACENTRUM_SCRATCH_PATH):
+        return model_path
+    else:
+        raise ValueError(
+            f"Provided model path does not include valid scratch prefix {METACENTRUM_SCRATCH_PREFIX} or path {METACENTRUM_SCRATCH_PATH}"
+        )
