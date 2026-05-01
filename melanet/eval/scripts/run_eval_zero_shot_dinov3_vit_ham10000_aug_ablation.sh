@@ -1,10 +1,11 @@
 MODEL_NAME="dinov3_vit_ham10000"
 MODEL_PATH="timm/vit_huge_plus_patch16_dinov3.lvd1689m"
 
-DATASET_PATH="/home/sulcm/datasets/ham10000/HAM10000"
+# DATASET_PATH="/home/sulcm/datasets/ham10000/HAM10000"
+DATASET_PATH="metacentrum_scratch/HAM10000"
 
 PREDICTION_STRATEGY="greedy"
-BATCH_SIZE=64
+BATCH_SIZE=128
 
 OUTPUT_DIR="./outputs/${MODEL_NAME}"
 mkdir -p "$OUTPUT_DIR"

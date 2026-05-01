@@ -1,10 +1,11 @@
 MODEL_NAME="vit_ham10000"
 MODEL_PATH="/home/sulcm/models/melanet/vit_base/melanet_vit_base_fine_grid-dxjjru4m"
 
-DATASET_PATH="/home/sulcm/datasets/ham10000/HAM10000"
+# DATASET_PATH="/home/sulcm/datasets/ham10000/HAM10000"
+DATASET_PATH="metacentrum_scratch/HAM10000"
 
 PREDICTION_STRATEGY="greedy"
-BATCH_SIZE=128
+BATCH_SIZE=256
 
 OUTPUT_DIR="./outputs/${MODEL_NAME}"
 mkdir -p "$OUTPUT_DIR"
