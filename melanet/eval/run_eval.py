@@ -38,7 +38,7 @@ from melanet.functional.softmax import softmax
 from melanet.utils import tensor2value, kwargs2cli
 from melanet.inference import run_inference
 from formatter.isic import format_isic_submission
-from metacentrum_utils import DATASET_SCRATCH_PREFIX, load_dataset_from_scratch
+from metacentrum_utils import METACENTRUM_SCRATCH_PREFIX, load_dataset_from_scratch, resolve_model_scratch_path
 
 
 logger = logging.getLogger(__name__)
@@ -285,7 +285,7 @@ def load_and_validate_dataset(dataset_name: str, eval_args: EvaluateArguments, d
         dataset = load_from_disk(
             dataset_path=dataset_name
         )
-    elif dataset_name.startswith(DATASET_SCRATCH_PREFIX):
+    elif dataset_name.startswith(METACENTRUM_SCRATCH_PREFIX):
         # Load from scratch directory on Metacentrum
         logger.info(f"Loading dataset {dataset_name} from scratch storage")
         dataset = load_dataset_from_scratch(
@@ -860,17 +860,28 @@ def evaluate(eval_args: EvaluateArguments):
                 f"During feature extraction can not use logits for prediction resolution. Using classic variant {eval_args.prediction_resolution_strategy}"
             )
 
+    # Add custom mapper to model classification head
     if not eval_args.eval_as_feature_extraction and "ham10000" in eval_args.dataset_name.lower():
         prediction_mapping = convert_milk10k2ham10000_preds
     else:
         prediction_mapping = None
 
+    # Resolve model paths if stored on scratch
+    if eval_args.model_name_or_path.startswith(METACENTRUM_SCRATCH_PREFIX):
+        _model_name_or_path = resolve_model_scratch_path(eval_args.model_name_or_path)
+    else:
+        _model_name_or_path = eval_args.model_name_or_path
+    if eval_args.zero_shot_model_name_or_path.startswith(METACENTRUM_SCRATCH_PREFIX):
+        _zero_shot_model_name_or_path = resolve_model_scratch_path(eval_args.zero_shot_model_name_or_path)
+    else:
+        _zero_shot_model_name_or_path = eval_args.zero_shot_model_name_or_path
+
     # Init model
     model = MelaNet(
-        model_name=eval_args.model_name_or_path,
+        model_name=_model_name_or_path,
         is_feature_extractor=eval_args.eval_as_feature_extraction,
         feature_extractor_config=FeatureExtractorConfig.from_cli(eval_args.feature_extractor_config) if eval_args.feature_extractor_config is not None else None,
-        zero_shot_model_name=eval_args.zero_shot_model_name_or_path,
+        zero_shot_model_name=_zero_shot_model_name_or_path,
         zero_shot_config=ZeroShotConfig.from_cli(eval_args.zero_shot_config) if eval_args.zero_shot_config is not None else None,
         ft_model_adapter_name=eval_args.ft_model_adapter_name,
         zero_shot_model_adapter_name=eval_args.zero_shot_model_adapter_name,

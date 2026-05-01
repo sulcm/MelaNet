@@ -37,7 +37,7 @@ from torchmetrics.functional import (
 if __name__ == "__main__":
     # Script is run directly
     from loss_functions import FocalLoss, SupConLoss, SeesawLoss
-    from metacentrum_utils import load_dataset_from_scratch, DATASET_SCRATCH_PREFIX
+    from metacentrum_utils import load_dataset_from_scratch, METACENTRUM_SCRATCH_PREFIX
     from train_utils import generate_id, check_report_to_integration
     from melanet.adapters import (
         ADAPTER_TYPES,
@@ -48,7 +48,7 @@ if __name__ == "__main__":
 else:
     # Script is being imported or used from different location
     from .loss_functions import FocalLoss, SupConLoss, SeesawLoss
-    from .metacentrum_utils import load_dataset_from_scratch, DATASET_SCRATCH_PREFIX
+    from .metacentrum_utils import load_dataset_from_scratch, METACENTRUM_SCRATCH_PREFIX
     from .train_utils import generate_id, check_report_to_integration
     from .melanet.adapters import (
         ADAPTER_TYPES,
@@ -377,7 +377,7 @@ def main(args: Optional[dict[str, Any]] = None):
         dataset = load_from_disk(
             dataset_path=data_args.dataset_name
         )
-    elif data_args.dataset_name.startswith(DATASET_SCRATCH_PREFIX):
+    elif data_args.dataset_name.startswith(METACENTRUM_SCRATCH_PREFIX):
         # Load from scratch directory on Metacentrum
         logger.info(f"Loading dataset {data_args.dataset_name} from scratch storage")
         dataset = load_dataset_from_scratch(
