@@ -1,9 +1,9 @@
 AUGMENTATIONS="horizontal_flip,vertical_flip"
 
-MODEL_TYPE="resnet50"
-MODEL_PATH="metacentrum_scratch/melanet_resnet50_fine_grid-n5511yzn"
+MODEL_TYPE="swinv2_base"
+MODEL_PATH="metacentrum_scratch/melanet_swinv2_base_grid-g3ki3vjd"
 SAVE_DIR="/storage/plzen4-ntis/home/sulcm01/datasets/melanet"
-BATCH_SIZE=256
+BATCH_SIZE=128
 
 DATASET_PATHS=("metacentrum_scratch/SpilledMILK10k" "metacentrum_scratch/HAM10000")
 for dataset_path in "${DATASET_PATHS[@]}"; do

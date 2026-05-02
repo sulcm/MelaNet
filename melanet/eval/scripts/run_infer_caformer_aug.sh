@@ -1,7 +1,7 @@
 AUGMENTATIONS="horizontal_flip,vertical_flip"
 
-MODEL_TYPE="resnet50"
-MODEL_PATH="metacentrum_scratch/melanet_resnet50_fine_grid-n5511yzn"
+MODEL_TYPE="caformer_s18"
+MODEL_PATH="metacentrum_scratch/melanet_caformer_s18_fine_grid-76v09gjq"
 SAVE_DIR="/storage/plzen4-ntis/home/sulcm01/datasets/melanet"
 BATCH_SIZE=256
 

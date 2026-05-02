@@ -13,9 +13,9 @@ for dataset_path in "${DATASET_PATHS[@]}"; do
         --run_inference_only True \
         --eval_as_feature_extraction True \
         --model_name_or_path "${MODEL_PATH}" \
-        --dataset_name "${DATASET_PATH}" \
+        --dataset_name "${dataset_path}" \
         --eval_split "validation" \
-        --index_name "${DATASET_PATH}" \
+        --index_name "${dataset_path}" \
         --index_split "train" \
         --id_column_name "isic_id" \
         --label_column_name "label" \
@@ -30,9 +30,9 @@ for dataset_path in "${DATASET_PATHS[@]}"; do
         --run_inference_only True \
         --eval_as_feature_extraction True \
         --model_name_or_path "${MODEL_PATH}" \
-        --dataset_name "${DATASET_PATH}" \
+        --dataset_name "${dataset_path}" \
         --eval_split "validation" \
-        --index_name "${DATASET_PATH}" \
+        --index_name "${dataset_path}" \
         --index_split "train" \
         --id_column_name "isic_id" \
         --label_column_name "label" \

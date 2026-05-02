@@ -14,9 +14,9 @@ for dataset_path in "${DATASET_PATHS[@]}"; do
         --eval_as_feature_extraction True \
         --zero_shot_model_name_or_path "${MODEL_PATH}" \
         --zero_shot_config "model_backend=timm" \
-        --dataset_name "${DATASET_PATH}" \
+        --dataset_name "${dataset_path}" \
         --eval_split "validation" \
-        --index_name "${DATASET_PATH}" \
+        --index_name "${dataset_path}" \
         --index_split "train" \
         --id_column_name "isic_id" \
         --label_column_name "label" \
@@ -32,9 +32,9 @@ for dataset_path in "${DATASET_PATHS[@]}"; do
         --eval_as_feature_extraction True \
         --zero_shot_model_name_or_path "${MODEL_PATH}" \
         --zero_shot_config "model_backend=timm" \
-        --dataset_name "${DATASET_PATH}" \
+        --dataset_name "${dataset_path}" \
         --eval_split "validation" \
-        --index_name "${DATASET_PATH}" \
+        --index_name "${dataset_path}" \
         --index_split "train" \
         --id_column_name "isic_id" \
         --label_column_name "label" \
