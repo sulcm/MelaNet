@@ -11,8 +11,9 @@ import torch.nn.functional as F
 from typing import cast, Optional, Callable, Literal
 from dataclasses import dataclass, field
 from datetime import datetime
+from collections import defaultdict
 
-from transformers import HfArgumentParser
+from transformers import HfArgumentParser, set_seed
 from datasets import load_from_disk, load_dataset, Dataset
 from datasets.combine import concatenate_datasets
 
@@ -165,6 +166,12 @@ class EvaluateArguments:
     id_column_name: str = field(
         default="id",
         metadata={"help": "The name of the dataset column containing the IDs of samples. Defaults to 'id'."},
+    )
+    cached_id_column_name: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": "The name of the cached dataset column containing the IDs of samples that will be mapped to `id_column_name` from original dataset. Defaults to `None`."
+        },
     )
     image_column_name: str = field(
         default="image",
@@ -404,7 +411,13 @@ def classifier_predict(
         cached_values = CacheManager[ClassifierCache].load(
             path=eval_args.load_cached_model_inference
         )
-        predictions = cached_values.cache["logits"]
+        if eval_args.cached_id_column_name:
+            cached_predictions = cached_values.cache["logits"]
+            predictions = defaultdict(list)
+            for cached_id, _id in zip(dataset[eval_args.cached_id_column_name], dataset[eval_args.id_column_name]):
+                predictions[_id].extend(cached_predictions[cached_id])
+        else:
+            predictions = cached_values.cache["logits"]
     else:
         predictions = run_inference(
             model=model,
@@ -541,6 +554,18 @@ def feature_extraction_predict(
         index_extracted_features = cached_values.cache["index"]
         eval_extracted_features = cached_values.cache["eval_dataset"]
         features_columns = cached_values.metadata["features_columns"]
+
+        if eval_args.cached_id_column_name:
+            if index_extracted_features is not None:
+                index_extracted_features[eval_args.id_column_name] = index_extracted_features[eval_args.cached_id_column_name].map({
+                    cached_id: _id
+                    for cached_id, _id in zip(index[eval_args.cached_id_column_name], index[eval_args.id_column_name])
+                })
+            if eval_extracted_features is not None:
+                eval_extracted_features[eval_args.id_column_name] = eval_extracted_features[eval_args.cached_id_column_name].map({
+                    cached_id: _id
+                    for cached_id, _id in zip(dataset[eval_args.cached_id_column_name], dataset[eval_args.id_column_name])
+                })
     else:
         index_extracted_features = run_inference(
             model=model,
@@ -659,7 +684,8 @@ def feature_extraction_predict(
                 for feat_name in features_columns
             },
             metric=vector_store_config.metric,
-            pca_components=vector_store_config.pca_components
+            pca_components=vector_store_config.pca_components,
+            l2_normalize=vector_store_config.l2_normalize
         )
         indexes_preds_w_scores = vector_store.predict(
             query_embeddings={
@@ -693,7 +719,8 @@ def feature_extraction_predict(
             cls_ids=np.asarray(index_extracted_features[eval_args.label_column_name].to_list()),
             embeddings=np.asarray(index_extracted_features[features_columns[0]].to_list(), dtype=np.float32).squeeze(),
             metric=vector_store_config.metric,
-            pca_components=vector_store_config.pca_components
+            pca_components=vector_store_config.pca_components,
+            l2_normalize=vector_store_config.l2_normalize
         )
         retrieved_labels_w_scores = vector_store.predict(
             query_embeddings= np.asarray(eval_extracted_features[features_columns[0]].to_list(), dtype=np.float32).squeeze(),
@@ -809,6 +836,9 @@ def evaluate(eval_args: EvaluateArguments):
     else:
         logger.info("Running evaluation")
     logger.info(f"Evaluation parameters {eval_args}")
+
+    if eval_args.seed is not None:
+        set_seed(eval_args.seed)
 
     # Prepare and load dataset
     if eval_args.eval_as_feature_extraction:

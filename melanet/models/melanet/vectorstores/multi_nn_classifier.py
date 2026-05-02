@@ -14,7 +14,8 @@ class MultiNNClassifier():
         cls_ids: list[int],
         embeddings: dict[str, np.ndarray],
         metric: Union[list[str], str] = None,
-        pca_components: Union[list[Optional[int]], Optional[int]] = None
+        pca_components: Union[list[Optional[int]], Optional[int]] = None,
+        l2_normalize: bool = False
     ):
         if metric is None:
             metric = [self.default_metric,] * len(embeddings)
@@ -28,13 +29,15 @@ class MultiNNClassifier():
             pca_components = [pca_components,] * len(embeddings)
         assert len(pca_components) == len(embeddings), "You must provide same number of PCA components as is number of initialized vector stores or `None`."
 
+        self.l2_normalize = l2_normalize
         self.idx2cls = cls_ids
         self.indexes = {
             _idx_name: NNClassifier(
                 cls_ids=cls_ids,
                 embeddings=_embeds,
                 metric=_metric,
-                pca_components=_pca_c
+                pca_components=_pca_c,
+                l2_normalize=l2_normalize
             )
             for (_idx_name, _embeds), _metric, _pca_c in zip(embeddings.items(), metric, pca_components)
         }

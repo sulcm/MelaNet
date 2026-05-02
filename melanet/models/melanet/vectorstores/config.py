@@ -10,6 +10,10 @@ class VectorStoreConfig(BaseModel):
         default="ip",
         description="Metric for similarity search in created index. Defaults to 'ip'."
     )
+    l2_normalize: bool = Field(
+        default=False,
+        description="Apply L2 normalization on embeddings before indexing and on passed queries. Defaults to `False`."
+    )
     pca_components: Union[Optional[int], list[Optional[int]]] = Field(
         default=None,
         description="Optional use of PCA for dimension reduction during index build and search. Turn OFF using `None`."

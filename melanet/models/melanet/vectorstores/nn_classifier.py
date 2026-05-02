@@ -4,11 +4,12 @@ import numpy as np
 from typing import Optional
 from collections import OrderedDict
 
+from ..embeddings.utils import normalize_embeddings
 from ..adapters import PCAAdapter
 
 
 class NNClassifier():
-    def __init__(self, cls_ids: list[int], embeddings: np.ndarray, metric: str = "ip", pca_components: Optional[int] = None):
+    def __init__(self, cls_ids: list[int], embeddings: np.ndarray, metric: str = "ip", l2_normalize: bool = False, pca_components: Optional[int] = None):
         """
         Create a FAISS index for nearest-neighbor classification.
         Args:
@@ -16,6 +17,7 @@ class NNClassifier():
             metric: 'l2' for Euclidean or 'ip' for inner product (cosine similarity if normalized).
         """
         self.metric = metric
+        self.l2_normalize = l2_normalize
         self.pca: Optional[PCAAdapter] = None
 
         self.idx2cls = cls_ids
@@ -23,10 +25,13 @@ class NNClassifier():
 
     def _build_index(self, embs: np.ndarray, metric: str, pca_components: Optional[int] = None):
         if pca_components is not None:
-            self.pca = PCAAdapter(out_features=pca_components, whiten=True, normalize=True)
-            self.pca = self.pca.fit(embs)
+            self.pca = PCAAdapter(out_features=pca_components, whiten=True)
+            self.pca.fit(embs)
         if self.pca is not None:
             embs = self.pca(embs)
+
+        if self.l2_normalize:
+            embs = normalize_embeddings(embs)
 
         if metric == "l2":
             index = faiss.IndexFlatL2(embs.shape[1])
@@ -61,6 +66,8 @@ class NNClassifier():
         """
         if self.pca is not None:
             query_embeddings = self.pca(query_embeddings)
+        if self.l2_normalize:
+            query_embeddings = normalize_embeddings(query_embeddings)
 
         if top_k == 1:
             __search_k = 1
