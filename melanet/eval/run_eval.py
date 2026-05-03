@@ -10,7 +10,7 @@ import torch.nn.functional as F
 
 from typing import cast, Optional, Callable, Literal
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, UTC
 from collections import defaultdict
 
 from transformers import HfArgumentParser, set_seed
@@ -86,6 +86,16 @@ class EvaluateArguments:
     load_cached_model_inference: Optional[str] = field(
         default=None,
         metadata={"help": "Provide path from where to load cached infered values from model. Using `CacheManager` so assume pickled file."},
+    )
+    load_cached_model_inference_to_eval: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": (
+                "Provide path from where to load cached infered values from model to evaluate."
+                " Used for feature extraction where index and queries can differ."
+                " Using `CacheManager` so assume pickled file."
+            )
+        },
     )
     cache_model_inference: Optional[str] = field(
         default=None,
@@ -406,7 +416,8 @@ def classifier_predict(
     metrics: Optional[dict] = None,
     tta_transforms: Optional[list[Callable[[torch.Tensor], torch.Tensor]]] = None
 ) -> dict[str, int]:
-    if eval_args.load_cached_model_inference and os.path.isfile(eval_args.load_cached_model_inference):
+    if eval_args.load_cached_model_inference:
+        assert os.path.isfile(eval_args.load_cached_model_inference), f"Cache {eval_args.load_cached_model_inference} must be file"
         logger.info(f"Loading cached logits from {eval_args.load_cached_model_inference}")
         cached_values = CacheManager[ClassifierCache].load(
             path=eval_args.load_cached_model_inference
@@ -546,14 +557,30 @@ def feature_extraction_predict(
     index_transforms: Optional[list[Callable[[torch.Tensor], torch.Tensor]]] = None,
     tta_transforms: Optional[list[Callable[[torch.Tensor], torch.Tensor]]] = None
 ) -> dict[str, int]:
-    if eval_args.load_cached_model_inference and os.path.isfile(eval_args.load_cached_model_inference):
-        logger.info(f"Loading cached features from {eval_args.load_cached_model_inference}")
-        cached_values = CacheManager[FeatureExtractorCache].load(
-            path=eval_args.load_cached_model_inference
-        )
-        index_extracted_features = cached_values.cache["index"]
-        eval_extracted_features = cached_values.cache["eval_dataset"]
-        features_columns = cached_values.metadata["features_columns"]
+    if eval_args.load_cached_model_inference:
+        assert os.path.isfile(eval_args.load_cached_model_inference), f"Cache {eval_args.load_cached_model_inference} must be file"
+        if eval_args.load_cached_model_inference_to_eval:
+            assert os.path.isfile(eval_args.load_cached_model_inference_to_eval), f"Cache {eval_args.load_cached_model_inference} must be file"
+            logger.info(
+                f"Loading cached index features from {eval_args.load_cached_model_inference} and queries from {eval_args.load_cached_model_inference_to_eval}"
+            )
+            cached_index = CacheManager[FeatureExtractorCache].load(
+                path=eval_args.load_cached_model_inference
+            )
+            cached_queries = CacheManager[FeatureExtractorCache].load(
+                path=eval_args.load_cached_model_inference_to_eval
+            )
+            index_extracted_features = cached_index.cache["index"]
+            eval_extracted_features = cached_queries.cache["eval_dataset"]
+            features_columns = cached_index.metadata["features_columns"]
+        else:
+            logger.info(f"Loading cached features from {eval_args.load_cached_model_inference}")
+            cached_values = CacheManager[FeatureExtractorCache].load(
+                path=eval_args.load_cached_model_inference
+            )
+            index_extracted_features = cached_values.cache["index"]
+            eval_extracted_features = cached_values.cache["eval_dataset"]
+            features_columns = cached_values.metadata["features_columns"]
 
         if eval_args.cached_id_column_name:
             if index_extracted_features is not None:
@@ -977,7 +1004,7 @@ def evaluate(eval_args: EvaluateArguments):
         )
 
     results = {
-        "datetime": datetime.now().isoformat(),
+        "datetime": datetime.now(tz=UTC).isoformat(),
         "model": eval_args.model_name_or_path,
         "zero_shot_model": eval_args.zero_shot_model_name_or_path,
         "adapters": {
@@ -1006,6 +1033,11 @@ def evaluate(eval_args: EvaluateArguments):
             "split": eval_args.index_split,
             "size": eval_args.index_size
         }
+        results["index_cache"] = eval_args.load_cached_model_inference
+        results["dataset_cache"] = (
+            eval_args.load_cached_model_inference_to_eval or
+            eval_args.load_cached_model_inference
+        )
         results["feature_extractor_config"] = eval_args.feature_extractor_config
         results["zero_shot_config"] = eval_args.zero_shot_config
         results["vector_store_config"] = eval_args.vector_store_config
@@ -1017,6 +1049,7 @@ def evaluate(eval_args: EvaluateArguments):
             results["test_time_augmentations"] = eval_args.test_time_augmentations
     else:
         results["test_time_augmentations"] = eval_args.apply_augmentations or eval_args.test_time_augmentations
+        results["dataset_cache"] = eval_args.load_cached_model_inference
 
     logger.info(f"Saving final results to file {eval_args.results_path}")
     with open(eval_args.results_path, "w") as f:
