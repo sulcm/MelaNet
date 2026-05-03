@@ -1,7 +1,10 @@
 # Models
+# =========================================================================================================
 
 # MODEL_NAME="resnet50"
 # MODEL_PATH="/home/sulcm/models/melanet/resnet50/melanet_resnet50_fine_grid-n5511yzn"
+
+# =========================================================================================================
 
 MODEL_NAME="vit_base"
 MODEL_PATH="/home/sulcm/models/melanet/vit_base/melanet_vit_base_fine_grid-dxjjru4m"

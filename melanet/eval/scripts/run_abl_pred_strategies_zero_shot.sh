@@ -1,8 +1,11 @@
 # Models
+# =========================================================================================================
 
 # MODEL_NAME="dermlip_vit"
 # MODEL_PATH="hf-hub:redlessone/DermLIP_ViT-B-16"
 # BACKEND_TYPE="open_clip" # timm, open_clip, hf
+
+# =========================================================================================================
 
 MODEL_NAME="dinov3_vit"
 MODEL_PATH="timm/vit_huge_plus_patch16_dinov3.lvd1689m"
