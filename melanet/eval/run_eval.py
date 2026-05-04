@@ -153,6 +153,10 @@ class EvaluateArguments:
         default=None,
         metadata={"help": "Use augmentations during test time. Defaults to `None` -> off. Can be 'all' or list of augmentations in format 'augment_1,augment_2,...'."}
     )
+    augmentations_keep_original: Optional[bool] = field(
+        default=True,
+        metadata={"help": "When using augmentations specify whether to keep the original image. Defaults to `True`."}
+    )
     ft_model_adapter_name: Optional[str] = field(
         default=None,
         metadata={"help": "Path to pretrained feature adapter for fine-tuned model in format `<adapter_type>---<adapter_path>`."}
@@ -438,6 +442,7 @@ def classifier_predict(
             model_kwargs={"return_logits": True},
             batch_size=eval_args.batch_size,
             transforms=tta_transforms,
+            transforms_keep_original=eval_args.augmentations_keep_original,
             num_workers=eval_args.num_workers,
             pin_memory=True,
             device_type=eval_args.device
@@ -467,7 +472,8 @@ def classifier_predict(
                     "is_feature_extractor": eval_args.eval_as_feature_extraction,
                     "zero_shot_config": kwargs2cli(**model.zero_shot_config.model_dump()) if model.zero_shot_config is not None else None,
                     "feature_extractor_config": kwargs2cli(**model.feature_extractor_config.model_dump()) if model.feature_extractor_config is not None else None,
-                    "tta_transforms": eval_args.test_time_augmentations or eval_args.apply_augmentations
+                    "tta_transforms": eval_args.test_time_augmentations or eval_args.apply_augmentations,
+                    "transforms_keep_original": eval_args.augmentations_keep_original
                 }
             )
 
@@ -601,6 +607,7 @@ def feature_extraction_predict(
             id_column_name=eval_args.id_column_name,
             batch_size=eval_args.batch_size,
             transforms=index_transforms,
+            transforms_keep_original=eval_args.augmentations_keep_original,
             num_workers=eval_args.num_workers,
             pin_memory=True,
             device_type=eval_args.device
@@ -612,6 +619,7 @@ def feature_extraction_predict(
             id_column_name=eval_args.id_column_name,
             batch_size=eval_args.batch_size,
             transforms=tta_transforms,
+            transforms_keep_original=eval_args.augmentations_keep_original,
             num_workers=eval_args.num_workers,
             pin_memory=True,
             device_type=eval_args.device
@@ -687,7 +695,8 @@ def feature_extraction_predict(
                     },
                     "features_columns": features_columns,
                     "index_transforms": eval_args.index_augmentations or eval_args.apply_augmentations,
-                    "tta_transforms": eval_args.test_time_augmentations or eval_args.apply_augmentations
+                    "tta_transforms": eval_args.test_time_augmentations or eval_args.apply_augmentations,
+                    "transforms_keep_original": eval_args.augmentations_keep_original
                 }
             )
 
@@ -1047,9 +1056,11 @@ def evaluate(eval_args: EvaluateArguments):
         else:
             results["index_augmentations"] = eval_args.index_augmentations
             results["test_time_augmentations"] = eval_args.test_time_augmentations
+        results["augmentations_keep_original"] = eval_args.augmentations_keep_original
     else:
         results["test_time_augmentations"] = eval_args.apply_augmentations or eval_args.test_time_augmentations
         results["dataset_cache"] = eval_args.load_cached_model_inference
+        results["augmentations_keep_original"] = eval_args.augmentations_keep_original
 
     logger.info(f"Saving final results to file {eval_args.results_path}")
     with open(eval_args.results_path, "w") as f:

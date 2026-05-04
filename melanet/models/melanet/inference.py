@@ -20,20 +20,26 @@ class InferenceDataCollator():
         self,
         image_column_name: str,
         id_column_name: str,
-        transforms: list[Callable[[torch.Tensor], torch.Tensor]] = None
+        transforms: list[Callable[[torch.Tensor], torch.Tensor]] = None,
+        keep_original: bool = True
     ):
         self.image_column_name = image_column_name
         self.id_column_name = id_column_name
+        self.keep_original = bool(keep_original)
 
         self.transforms = transforms
-        self.num_views = (len(transforms) + 1) if transforms else 1
+        self.num_views = (len(transforms) + self.keep_original) if transforms else 1
 
     def __call__(self, batch):
         images = [sample[self.image_column_name] for sample in batch]
         lesion_ids = np.array([sample[self.id_column_name] for sample in batch])
 
         if self.transforms:
-            images = create_views_batched(images, self.transforms)
+            images = create_views_batched(
+                images,
+                transforms=self.transforms,
+                keep_original=self.keep_original
+            )
             lesion_ids = lesion_ids.repeat(self.num_views)
 
         return {
@@ -50,12 +56,14 @@ def run_inference(
     model_kwargs: dict[str, Any] = None,
     batch_size: int = 1,
     transforms: list[Callable[[torch.Tensor], torch.Tensor]] = None,
+    transforms_keep_original: bool = True,
     num_workers: int = 1,
     pin_memory: bool = True,
     device_type: str = "cuda",
 ) -> dict[str, Union[list[np.ndarray], list[pd.DataFrame]]]:
+    _transforms_keep_original = bool(transforms_keep_original)
     if transforms:
-        real_batch_size = batch_size // (len(transforms) + 1)
+        real_batch_size = batch_size // (len(transforms) + _transforms_keep_original)
     else:
         real_batch_size = batch_size
     assert real_batch_size > 0
@@ -65,14 +73,13 @@ def run_inference(
     collator = InferenceDataCollator(
         image_column_name=image_column_name,
         id_column_name=id_column_name,
-        transforms=transforms
+        transforms=transforms,
+        keep_original=_transforms_keep_original
     )
     dataloader = DataLoader(
         dataset,
         batch_size=real_batch_size,
         num_workers=num_workers,
-        persistent_workers=True,
-        prefetch_factor=2,
         pin_memory=pin_memory,
         collate_fn=collator
     )

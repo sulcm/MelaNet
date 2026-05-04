@@ -221,6 +221,7 @@
                 // "--vector_store_config", "metric=ip,l2_normalize=True,top_k=10",
                 // "--index_augmentations", "vertical_flip",
                 // "--test_time_augmentations", "vertical_flip",
+                // "--augmentations_keep_original", "False",
                 "--results_path", "./outputs/debug_feature_extraction.json",
                 // "--isic_submission_path", "./outputs/debug_feature_extraction.csv",
             ],

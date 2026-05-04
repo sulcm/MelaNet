@@ -7,17 +7,20 @@ from typing import Callable, Any
 
 def create_views(
     image: Any,
-    transforms: list[Callable[[torch.Tensor], torch.Tensor]] = None
+    transforms: list[Callable[[torch.Tensor], torch.Tensor]] = None,
+    keep_original: bool = True
 ) -> list[torch.Tensor]:
     t_image = to_dtype(
         to_image(image),
         dtype=torch.float32,
         scale=True
     )
-    views = [t_image,]
     if transforms is None:
-        return views
-
+        return [t_image,]
+    
+    views = []
+    if keep_original:
+        views.append(t_image)
     for transform in transforms:
         views.append(
             transform(t_image)
@@ -27,7 +30,8 @@ def create_views(
 
 def create_views_batched(
     images: list[Any],
-    transforms: list[Callable[[torch.Tensor], torch.Tensor]] = None
+    transforms: list[Callable[[torch.Tensor], torch.Tensor]] = None,
+    keep_original: bool = True
 ) -> list[torch.Tensor]:
     tensor_images = [
         to_dtype(
@@ -41,6 +45,10 @@ def create_views_batched(
         return tensor_images
 
     views = []
-    for t_im in tensor_images:
-        views.extend([t_im] + [t(t_im) for t in transforms])
+    if keep_original:
+        for t_im in tensor_images:
+            views.extend([t_im] + [t(t_im) for t in transforms])
+    else:
+        for t_im in tensor_images:
+            views.extend([t(t_im) for t in transforms])
     return views
