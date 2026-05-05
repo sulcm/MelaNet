@@ -429,7 +429,6 @@ def main(args: Optional[dict[str, Any]] = None):
             "`adapter_output_path` or `output_dir` must be set"
         )
     logger.info(f"Trained Adapter will be saved to {model_args.adapter_output_path}")
-    return
 
     # Set seed (before initializing model in case there are no pretrained weights)
     set_seed(training_args.seed)
