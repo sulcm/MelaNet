@@ -1,3 +1,5 @@
+import json
+
 from typing import Optional, Union
 from pydantic import BaseModel, Field
 
@@ -29,6 +31,15 @@ class FeatureAdapterConfig(BaseModel):
                 key, value = mapping.split("=")
                 init_kwargs[key] = value
         return cls(**init_kwargs)
+
+    @classmethod
+    def from_args(cls, args: str) -> "FeatureAdapterConfig":
+        try:
+            _config_kwargs = json.loads(args)
+            _config = cls(**_config_kwargs)
+        except Exception:
+            _config = cls.from_cli(args)
+        return _config
 
 
 def create_default_feature_adapter_config(out_features: int, **kwargs) -> FeatureAdapterConfig:

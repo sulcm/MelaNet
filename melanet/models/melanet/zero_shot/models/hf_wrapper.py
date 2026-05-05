@@ -17,6 +17,18 @@ class HfModelWrapper():
         self.model = AutoModel.from_pretrained(model_name)
         self.model.eval().to(self.device)
 
+    def freeze_parameters(self):
+        for param in self.model.parameters():
+            param.requires_grad = False
+
+    def eval(self):
+        self.model.eval()
+        return self
+
+    def to(self, *args, **kwargs):
+        self.model.to(*args, **kwargs)
+        return self
+
     def extract_features(self, image, **kwargs):
         inputs = self.image_processor(image, return_tensors="pt").to(self.device)
         outputs = self.model(**inputs)

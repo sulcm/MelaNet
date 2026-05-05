@@ -1,6 +1,7 @@
 import os
 import sys
 import json
+import random
 import logging
 import torch
 import torch.nn as nn
@@ -8,7 +9,9 @@ import torch.nn.functional as F
 import numpy as np
 import transformers
 
-from typing import cast, Optional, Callable, Literal, Any
+from torchvision.transforms import v2 as torch_augmentation
+
+from typing import cast, Optional, Callable, Literal, Any, Union
 from dataclasses import dataclass, field
 from functools import partial
 from collections import Counter
@@ -37,25 +40,27 @@ from torchmetrics.functional import (
 if __name__ == "__main__":
     # Script is run directly
     from loss_functions import FocalLoss, SupConLoss, SeesawLoss
-    from metacentrum_utils import load_dataset_from_scratch, METACENTRUM_SCRATCH_PREFIX
-    from train_utils import generate_id, check_report_to_integration
+    from metacentrum_utils import load_dataset_from_scratch, resolve_model_scratch_path, METACENTRUM_SCRATCH_PREFIX
+    from train_utils import generate_id, check_report_to_integration, TrainerPhaseDetectorCallback
     from melanet.adapters import (
         ADAPTER_TYPES,
         AdapterWrapper,
         LearnableAdapter,
         FeatureAdapterConfig
     )
+    from melanet.adapters.learnable_with_melanet import LearnableAdapterWithMelaNetWrapper
 else:
     # Script is being imported or used from different location
     from .loss_functions import FocalLoss, SupConLoss, SeesawLoss
-    from .metacentrum_utils import load_dataset_from_scratch, METACENTRUM_SCRATCH_PREFIX
-    from .train_utils import generate_id, check_report_to_integration
+    from .metacentrum_utils import load_dataset_from_scratch, resolve_model_scratch_path, METACENTRUM_SCRATCH_PREFIX
+    from .train_utils import generate_id, check_report_to_integration, TrainerPhaseDetectorCallback
     from .melanet.adapters import (
         ADAPTER_TYPES,
         AdapterWrapper,
         LearnableAdapter,
         FeatureAdapterConfig
     )
+    from .melanet.adapters.learnable_with_melanet import LearnableAdapterWithMelaNetWrapper
 
 
 logger = logging.getLogger(__name__)
@@ -144,7 +149,8 @@ class AdapterArguments:
     Arguments pertaining to which model adapter we are going to train.
     """
 
-    adapter_output_path: str = field(
+    adapter_output_path: Optional[str] = field(
+        default=None,
         metadata={"help": "Path where to save trained adapter."},
     )
     adapter_name_or_path: Optional[str] = field(
@@ -158,6 +164,46 @@ class AdapterArguments:
     adapter_config: Optional[str] = field(
         default=None, metadata={"help": "Config from which adapter will be initialized."}
     )
+
+
+@dataclass
+class FeatureExtractorArguments:
+    model_name_or_path: Optional[str] = field(
+        default=None,
+        metadata={"help": "Path to finetuned model or model identifier from huggingface.co/models. Can be `None` for `feature_classification` when using zero-shot model."},
+    )
+    zero_shot_model_name_or_path: Optional[str] = field(
+        default=None,
+        metadata={"help": "Path to pre-trained zero-shot model or model identifier from huggingface.co/models. Only used when `feature_classification` is active."},
+    )
+    feature_extractor_config: Optional[str] = field(
+        default=None,
+        metadata={"help": "Used for configuring feature extraction process."}
+    )
+    zero_shot_config: Optional[str] = field(
+        default=None,
+        metadata={"help": "Used for configuring zero-shot process."}
+    )
+    apply_augmentations_prob: Optional[float] = field(
+        default=None,
+        metadata={"help": "Apply data augmentations on-the-fly using `torchvision.transforms` on samples in batch with given probability."}
+    )
+    apply_mixup_cutmix_prob: Optional[float] = field(
+        default=None,
+        metadata={
+            "help": (
+                "Apply randomly chosen MixUp or CutMix augmentation on-the-fly using `torchvision.transforms` on samples in batch with given probability."
+                " Be aware that those augmentations also modify the labels and returns soft labels e.i. [N,] -> [N, C]."
+                " Make sure that used loss functions support soft labels as targets."
+            )
+        }
+    )
+
+    def have_models(self) -> bool:
+        return (
+            self.model_name_or_path or
+            self.zero_shot_model_name_or_path
+        )
 
 
 @dataclass
@@ -332,7 +378,7 @@ def _get_metrics(
 
 
 def main(args: Optional[dict[str, Any]] = None):
-    parser = HfArgumentParser((AdapterArguments, DataTrainingArguments, TrainingArguments, AuxiliaryArguments))
+    parser = HfArgumentParser((AdapterArguments, DataTrainingArguments, FeatureExtractorArguments, TrainingArguments, AuxiliaryArguments))
     if args is not None:
         parsed_args = parser.parse_dict(args=args)
     elif len(sys.argv) == 2 and sys.argv[1].endswith(".json"):
@@ -340,7 +386,7 @@ def main(args: Optional[dict[str, Any]] = None):
         parsed_args = parser.parse_json_file(json_file=os.path.abspath(sys.argv[1]))
     else:
         parsed_args = parser.parse_args_into_dataclasses()
-    model_args, data_args, training_args, aux_args = cast(tuple[AdapterArguments, DataTrainingArguments, TrainingArguments, AuxiliaryArguments], parsed_args)
+    model_args, data_args, feat_extractor_args, training_args, aux_args = cast(tuple[AdapterArguments, DataTrainingArguments, FeatureExtractorArguments, TrainingArguments, AuxiliaryArguments], parsed_args)
 
     # Setup logging
     logging.basicConfig(
@@ -366,6 +412,24 @@ def main(args: Optional[dict[str, Any]] = None):
     )
     logger.info(f"Training/evaluation parameters {training_args}")
     logger.info(f"Adapter model parameters {model_args}")
+
+    # Handle save path
+    if model_args.adapter_output_path is not None:
+        if not (model_args.adapter_output_path.endswith(".pt") or model_args.adapter_output_path.endswith(".pkl")):
+            raise ValueError(
+                "`adapter_output_path` should use '.pt' or '.pkl' extension"
+            )
+    elif training_args.output_dir is not None:
+        logger.warning("`adapter_output_path` is not set trying to fall back to `output_dir`")
+        if not training_args.output_dir.endswith(".pt"):
+            # Assume `LearnableAdapter`
+            model_args.adapter_output_path = f"{training_args.output_dir.rstrip(os.path.sep)}.pt"
+    else:
+        raise ValueError(
+            "`adapter_output_path` or `output_dir` must be set"
+        )
+    logger.info(f"Trained Adapter will be saved to {model_args.adapter_output_path}")
+    return
 
     # Set seed (before initializing model in case there are no pretrained weights)
     set_seed(training_args.seed)
@@ -530,25 +594,42 @@ def main(args: Optional[dict[str, Any]] = None):
             loss /= (loss_norm_denom + eps)
         return loss
 
-    if model_args.adapter_name_or_path is not None:
-        logger.info(f"Initializing adapter from path {model_args.adapter_name_or_path}")
-        adapter_model = AdapterWrapper.from_pretrained(model_args.adapter_name_or_path)
-    elif model_args.adapter_type is not None and model_args.adapter_config is not None:
-        try:
-            logger.info("Initializing adapter from `adapter_config`. Trying to load if as JSON ...")
-            _adapter_config_kwargs = json.loads(model_args.adapter_config)
-            adapter_config = FeatureAdapterConfig(**_adapter_config_kwargs)
-        except Exception:
-            logger.info("Loading `adapter_config` as JSON failed falling back to CLI style kwargs")
-            adapter_config = FeatureAdapterConfig.from_cli(model_args.adapter_config)
-        adapter_model = AdapterWrapper.from_config(
+    if feat_extractor_args.have_models():
+        # Resolve model paths if stored on scratch
+        if feat_extractor_args.model_name_or_path and feat_extractor_args.model_name_or_path.startswith(METACENTRUM_SCRATCH_PREFIX):
+            _model_name_or_path = resolve_model_scratch_path(feat_extractor_args.model_name_or_path)
+        else:
+            _model_name_or_path = feat_extractor_args.model_name_or_path
+        if feat_extractor_args.zero_shot_model_name_or_path and feat_extractor_args.zero_shot_model_name_or_path.startswith(METACENTRUM_SCRATCH_PREFIX):
+            _zero_shot_model_name_or_path = resolve_model_scratch_path(feat_extractor_args.zero_shot_model_name_or_path)
+        else:
+            _zero_shot_model_name_or_path = feat_extractor_args.zero_shot_model_name_or_path
+
+        adapter_model = LearnableAdapterWithMelaNetWrapper(
+            adapter_name_or_path=model_args.adapter_name_or_path,
             adapter_type=model_args.adapter_type,
-            config=adapter_config
+            adapter_config=model_args.adapter_config,
+            model_name=_model_name_or_path,
+            feature_extractor_config=feat_extractor_args.feature_extractor_config,
+            zero_shot_model_name=_zero_shot_model_name_or_path,
+            zero_shot_config=feat_extractor_args.zero_shot_config,
+            device=training_args.device
         )
     else:
-        raise ValueError(
-            "You must provide `adapter_model` OR (`adapter_type` and `adapter_config`)"
-        )
+        if model_args.adapter_name_or_path is not None:
+            logger.info(f"Initializing adapter from path {model_args.adapter_name_or_path}")
+            adapter_model = AdapterWrapper.from_pretrained(model_args.adapter_name_or_path)
+        elif model_args.adapter_type is not None and model_args.adapter_config is not None:
+            adapter_config = FeatureAdapterConfig.from_args(model_args.adapter_config)
+            logger.info(f"Loaded `adapter_config` {adapter_config}")
+            adapter_model = AdapterWrapper.from_config(
+                adapter_type=model_args.adapter_type,
+                config=adapter_config
+            )
+        else:
+            raise ValueError(
+                "You must provide `adapter_model` OR (`adapter_type` and `adapter_config`)"
+            )
     logger.info(f"Initialized adapter model {adapter_model}")
 
     if aux_args.additional_optim_kwargs:
@@ -583,7 +664,72 @@ def main(args: Optional[dict[str, Any]] = None):
 
     # Training
     logger.info(f"Starting training of `{adapter_model.adapter_type}` adapter")
-    if adapter_model.adapter_type == "pca":
+    if feat_extractor_args.have_models():
+        # Augmentation transforms on data collected from `ImageProcessor`s
+        apply_augmentations_prob = feat_extractor_args.apply_augmentations_prob if feat_extractor_args.apply_augmentations_prob is not None and feat_extractor_args.apply_augmentations_prob > 0.0 else 0.0
+        apply_mixup_cutmix_prob = feat_extractor_args.apply_mixup_cutmix_prob if feat_extractor_args.apply_mixup_cutmix_prob is not None and feat_extractor_args.apply_mixup_cutmix_prob > 0.0 else 0.0
+
+        rand_augment = torch_augmentation.RandAugment(
+            num_ops=2,
+            magnitude=9
+        )
+        mixup_or_cutmix = torch_augmentation.RandomChoice([
+            torch_augmentation.MixUp(
+                alpha=0.4,
+                num_classes=len(labels)
+            ),
+            torch_augmentation.CutMix(
+                alpha=1.0,
+                num_classes=len(labels)
+            )
+        ])
+
+        def apply_augmentation_transforms(images, labels):
+            if apply_augmentations_prob > 0.0:
+                # Workaround for torchvision.transforms applying same RNG state for whole batch -> iterate thru batch
+                images = [
+                    rand_augment(image)
+                    if random.random() <= apply_augmentations_prob else
+                    image
+                    for image in images
+                ]
+
+            if apply_mixup_cutmix_prob > 0.0 and random.random() <= apply_mixup_cutmix_prob:
+                images, labels = mixup_or_cutmix(images, labels)
+
+            return images, labels
+
+        # Collect outputs from batched processing
+        image_column_name = feature_columns[0]
+        class ImageDataCollatorWithPhase():
+            def __init__(self, augment_phase: Union[str, list[str]] = "train", phase_callback: Optional[TrainerPhaseDetectorCallback] = None):
+                self.phase_callback = phase_callback.get_trainer_phase if phase_callback is not None else lambda: None
+                self.augment_phase = set([augment_phase,] if isinstance(augment_phase, str) else augment_phase)
+
+            def __call__(self, samples):
+                images = [sample[image_column_name] for sample in samples]
+                labels = torch.tensor([sample[data_args.label_column_name] for sample in samples])
+
+                phase = self.phase_callback()
+                if phase in self.augment_phase:
+                    if apply_augmentations_prob > 0.0 or apply_mixup_cutmix_prob > 0.0:
+                        images, labels = apply_augmentation_transforms(images, labels)
+
+                return {"image": images, "labels": labels}
+
+        phase_callback = TrainerPhaseDetectorCallback()
+        data_collator = ImageDataCollatorWithPhase(phase_callback=phase_callback)
+
+        adapter_model.fit(
+            training_args=training_args,
+            train_dataset=dataset["train"],
+            eval_dataset=dataset["validation"],
+            optimizer_cls_and_kwargs=optimizer_cls_and_kwargs,
+            compute_loss_func=compute_loss_func,
+            compute_metrics=compute_metrics,
+            data_collator=data_collator
+        )
+    elif adapter_model.adapter_type == "pca":
         ft_col = feature_columns[0]
         X_train = np.asarray(dataset["train"][ft_col])
         adapter_model.fit(X_train)
@@ -606,6 +752,22 @@ def main(args: Optional[dict[str, Any]] = None):
                         torch.tensor(ft) for ft in example_batch[ft_c]
                     ]
                 return example_batch
+
+            if data_args.label_column_name not in dataset["train"].column_names:
+                def collate_fn(batch) -> tuple[list[torch.Tensor], None]:
+                    features = [
+                        torch.stack([sample[ft_name] for sample in batch])
+                        for ft_name in ft_col
+                    ]
+                    return {"features": features, "labels": None}
+            else:
+                def collate_fn(batch) -> tuple[list[torch.Tensor], torch.Tensor]:
+                    features = [
+                        torch.stack([sample[ft_name] for sample in batch])
+                        for ft_name in ft_col
+                    ]
+                    labels = torch.tensor([sample[data_args.label_column_name] for sample in batch])
+                    return {"features": features, "labels": labels}
         else:
             ft_col = feature_columns[0]
 
@@ -623,6 +785,16 @@ def main(args: Optional[dict[str, Any]] = None):
                 ]
                 return example_batch
 
+            if data_args.label_column_name not in dataset["train"].column_names:
+                def collate_fn(batch) -> tuple[torch.Tensor, None]:
+                    features = torch.stack([sample[ft_col] for sample in batch])
+                    return {"features": features, "labels": None}
+            else:
+                def collate_fn(batch) -> tuple[torch.Tensor, torch.Tensor]:
+                    features = torch.stack([sample[ft_col] for sample in batch])
+                    labels = torch.tensor([sample[data_args.label_column_name] for sample in batch])
+                    return {"features": features, "labels": labels}
+
         dataset["train"].set_transform(train_transforms)
         dataset["validation"].set_transform(val_transforms)
 
@@ -630,11 +802,10 @@ def main(args: Optional[dict[str, Any]] = None):
             training_args=training_args,
             train_dataset=dataset["train"],
             eval_dataset=dataset["validation"],
-            feature_column_names=ft_col,
-            label_column_name=data_args.label_column_name,
             optimizer_cls_and_kwargs=optimizer_cls_and_kwargs,
             compute_loss_func=compute_loss_func,
-            compute_metrics=compute_metrics
+            compute_metrics=compute_metrics,
+            data_collator=collate_fn
         )
     else:
         raise ValueError(

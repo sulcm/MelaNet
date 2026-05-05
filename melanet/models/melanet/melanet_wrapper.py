@@ -83,6 +83,36 @@ class MelaNet():
             self.model = AutoModelForImageClassification.from_pretrained(model_name)
             self.model.eval().to(self.device)
 
+    def freeze_parameters(self):
+        if self.is_feature_extractor:
+            if self.ft_model is not None:
+                self.ft_model.freeze_parameters()
+            if self.zero_shot_model is not None:
+                self.zero_shot_model.freeze_parameters()
+        else:
+            for param in self.model.parameters():
+                param.requires_grad = False
+
+    def eval(self):
+        if self.is_feature_extractor:
+            if self.ft_model is not None:
+                self.ft_model.eval()
+            if self.zero_shot_model is not None:
+                self.zero_shot_model.eval()
+        else:
+            self.model.eval()
+        return self
+
+    def to(self, *args, **kwargs):
+        if self.is_feature_extractor:
+            if self.ft_model is not None:
+                self.ft_model.to(*args, **kwargs)
+            if self.zero_shot_model is not None:
+                self.zero_shot_model.to(*args, **kwargs)
+        else:
+            self.model.to(*args, **kwargs)
+        return self
+
     def get_labels(self) -> Optional[list[str]]:
         if self.is_feature_extractor:
             return None

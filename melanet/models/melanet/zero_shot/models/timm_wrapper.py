@@ -39,6 +39,18 @@ class TimmModelWrapper():
             transform.__class__.__name__ == "ToTensor" for transform in self.image_processor.transforms
         )
 
+    def freeze_parameters(self):
+        for param in self.model.parameters():
+            param.requires_grad = False
+
+    def eval(self):
+        self.model.eval()
+        return self
+
+    def to(self, *args, **kwargs):
+        self.model.to(*args, **kwargs)
+        return self
+
     def extract_features(self, image, **kwargs):
         if self._not_supports_tensor_input and isinstance(image, torch.Tensor):
             image = image.cpu().numpy()

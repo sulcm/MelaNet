@@ -1,0 +1,83 @@
+name: Sweep-Grid-Attn-Ensemble-ViT-ResNet
+description: "Grid search sweep training of attn. ensemble of fine-tuned ViT and ResNet50 models"
+method: grid
+metric:
+  goal: minimize
+  name: eval/loss
+parameters:
+  # Model:
+  adapter_type:
+    value: "fusion"
+  adapter_config:
+    value: "{\"in_features\":[768,2048],\"out_features\":11,\"use_attn\":true,\"attn_num_heads\":2,\"dropout\":0.1,\"modality_dropout\":0.05,\"drop_path_rate\":0.1}"
+  model_name_or_path:
+    value: "metacentrum_scratch/melanet_vit_base_fine_grid-dxjjru4m"
+  zero_shot_model_name_or_path:
+    value: "metacentrum_scratch/melanet_resnet50_fine_grid-n5511yzn"
+  zero_shot_config:
+    value: "model_backend=hf"
+  # Dataset:
+  dataset_name:
+    value: "metacentrum_scratch/SpilledMILK10k"
+  feature_column_names:
+    value: "image"
+  label_column_name:
+    value: "label"
+  remove_unused_columns:
+    value: False
+  # Training:
+  task:
+    value: "multiclass"
+  output_dir:
+    value: "/storage/plzen4-ntis/home/sulcm01/outputs/adapters/ViT_base_ResNet50_fusion_attn"
+  overwrite_output_dir:
+    value: True
+  save_steps:
+    value: 5000
+  save_total_limit:
+    value: 2
+  load_best_model_at_end:
+    value: True
+  metric_for_best_model:
+    value: "eval_loss"
+  greater_is_better:
+    value: False
+  logging_strategy:
+    value: "steps"
+  logging_steps:
+    value: 100
+  do_train:
+    value: True
+  do_eval:
+    value: True
+  fp16:
+    value: True
+  report_to:
+    value: "wandb"
+  dataloader_num_workers:
+    value: 8
+  seed:
+    value: 42
+  # Hyperparameters:
+  num_train_epochs:
+    value: 30
+  learning_rate:
+    values: [1e-6, 5e-6, 1e-5, 5e-5, 1e-4]
+  apply_augmentations_prob:
+    value: 0.5
+  weight_decay:
+    value: 1e-5
+  lr_scheduler_type:
+    value: "constant"
+  per_device_train_batch_size:
+    values: [64, 128]
+  gradient_accumulation_steps:
+    value: 1
+  per_device_eval_batch_size:
+    value: 256
+  eval_strategy:
+    value: "steps"
+  eval_steps:
+    value: 1000
+  save_strategy:
+    value: "steps"

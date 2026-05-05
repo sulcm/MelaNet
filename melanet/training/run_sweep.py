@@ -13,7 +13,7 @@ from transformers import HfArgumentParser
 logger = logging.getLogger(__name__)
 
 
-SUPPORTED_TRAINING_TASKS = ("image_classification",)
+SUPPORTED_TRAINING_TASKS = ("image_classification", "model_adapters",)
 OUTPUT_DIR_ARG = "output_dir"
 
 @dataclass
@@ -24,7 +24,7 @@ class SweepArguments:
 
     training_task: Literal[*SUPPORTED_TRAINING_TASKS] = field( # type: ignore
         metadata={
-            "help": "Task name that specifies which training script is used."
+            "help": f"Task name that specifies which training script is used. Currently supported options are {SUPPORTED_TRAINING_TASKS}."
         }
     )
     wandb_project: str = field(
@@ -68,6 +68,8 @@ def run_sweep(sweep_args: SweepArguments):
     logger.info(f"Initializing a hyperparameter search for task {sweep_args.training_task} ...")
     if sweep_args.training_task == "image_classification":
         from image_classification.run_image_classification import main
+    elif sweep_args.training_task == "model_adapters":
+        from model_adapters.run_model_adapters_training import main
     else:
         raise ValueError(
             f"In sweep arguments you must provide valid and supported task. Currently available tasks:\n{SUPPORTED_TRAINING_TASKS}"
