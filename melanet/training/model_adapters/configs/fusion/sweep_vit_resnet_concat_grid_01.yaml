@@ -78,6 +78,6 @@ parameters:
   eval_strategy:
     value: "steps"
   eval_steps:
-    value: 1000
+    value: 500
   save_strategy:
     value: "steps"

@@ -9,7 +9,7 @@ parameters:
   adapter_type:
     value: "fusion"
   adapter_config:
-    value: "{\"in_features\":[768,2048],\"out_features\":11,\"use_attn\":true,\"attn_num_heads\":2,\"dropout\":0.1,\"modality_dropout\":0.05,\"drop_path_rate\":0.1}"
+    value: "{\"in_features\":[768,2048],\"out_features\":11,\"use_attn\":true,\"attn_num_heads\":2,\"dropout\":0.1,\"modality_dropout\":0.05,\"drop_path_rate\":0.15}"
   model_name_or_path:
     value: "metacentrum_scratch/melanet_vit_base_fine_grid-dxjjru4m"
   zero_shot_model_name_or_path:
@@ -60,9 +60,9 @@ parameters:
     value: 42
   # Hyperparameters:
   num_train_epochs:
-    value: 30
+    value: 40
   learning_rate:
-    values: [1e-6, 5e-6, 1e-5, 5e-5, 1e-4]
+    values: [1e-6, 1.25e-6, 1.5e-6, 2e-6, 2.5e-6]
   apply_augmentations_prob:
     value: 0.5
   weight_decay:

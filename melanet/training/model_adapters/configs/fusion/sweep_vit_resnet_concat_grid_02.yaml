@@ -1,5 +1,5 @@
-name: Sweep-Grid-Attn-Ensemble-ViT-ResNet
-description: "Grid search sweep training of attn. ensemble of fine-tuned ViT and ResNet50 models"
+name: Sweep-Grid-Concat-Ensemble-ViT-ResNet
+description: "Grid search sweep training of concat. ensemble of fine-tuned ViT and ResNet50 models"
 method: grid
 metric:
   goal: minimize
@@ -9,7 +9,7 @@ parameters:
   adapter_type:
     value: "fusion"
   adapter_config:
-    value: "{\"in_features\":[768,2048],\"out_features\":11,\"use_attn\":true,\"attn_num_heads\":2,\"dropout\":0.1,\"modality_dropout\":0.05,\"drop_path_rate\":0.1}"
+    value: "{\"in_features\":[768,2048],\"out_features\":11,\"dropout\":0.1,\"modality_dropout\":0.05,\"drop_path_rate\":0.2}"
   model_name_or_path:
     value: "metacentrum_scratch/melanet_vit_base_fine_grid-dxjjru4m"
   zero_shot_model_name_or_path:
@@ -29,7 +29,7 @@ parameters:
   task:
     value: "multiclass"
   output_dir:
-    value: "/storage/plzen4-ntis/home/sulcm01/outputs/adapters/ViT_base_ResNet50_fusion_attn"
+    value: "/storage/plzen4-ntis/home/sulcm01/outputs/adapters/ViT_base_ResNet50_fusion_concat"
   overwrite_output_dir:
     value: True
   save_steps:
@@ -62,7 +62,7 @@ parameters:
   num_train_epochs:
     value: 30
   learning_rate:
-    values: [1e-6, 5e-6, 1e-5, 5e-5, 1e-4]
+    values: [1e-6, 1.25e-6, 2.5e-6, 5e-6, 1e-5]
   apply_augmentations_prob:
     value: 0.5
   weight_decay:
