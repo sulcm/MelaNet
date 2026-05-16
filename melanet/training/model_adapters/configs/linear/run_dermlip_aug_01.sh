@@ -1,5 +1,5 @@
 python run_model_adapters_training.py \
-    --adapter_output_path /home/sulcm/models/melanet/adapters/test_DermLIP_aug_lin_probe.pt \
+    --adapter_output_path /home/sulcm/models/melanet/adapters/linear/dermlip_vit/DermLIP_aug_lin_probe_01.pt \
     --adapter_type linear \
     --adapter_config "in_features=512,out_features=11" \
     --dataset_name /home/sulcm/datasets/milk10k/SpilledMILK10k_DermLIP_all_aug_features \
@@ -9,7 +9,7 @@ python run_model_adapters_training.py \
     --remove_unused_columns False \
     --overwrite_output_dir \
     --num_train_epochs 30 \
-    --learning_rate 3.33e-4 \
+    --learning_rate 2.5e-4 \
     --lr_scheduler_type constant \
     --weight_decay 1e-5 \
     --per_device_train_batch_size 64 \

@@ -17,7 +17,11 @@ OUTPUT_DIR="./outputs/${MODEL_NAME}_pred_strategies"
 mkdir -p "$OUTPUT_DIR"
 
 DATASET_PATHS=("/home/sulcm/datasets/milk10k/SpilledMILK10k" "/home/sulcm/datasets/ham10000/HAM10000")
+# DATASET_PATHS=("/home/sulcm/datasets/milk10k/SpilledMILK10k")
+# DATASET_PATHS=("/home/sulcm/datasets/ham10000/HAM10000")
 APPLIED_AUGMENT_COMBINATIONS=("index" "index_query" "query")
+AUG_FEATURES_PATH_SUFFIX="all_aug_features"
+PLAIN_FEATURES_PATH_SUFFIX="features"
 
 PREDICTION_STRATEGIES=("greedy" "rrf" "rrf_top_k_unique" "rrf_top_k")
 BASE_VS_CONFIG="metric=ip,l2_normalize=True"
@@ -29,14 +33,14 @@ for dataset_path in "${DATASET_PATHS[@]}"; do
 
     for augmented in "${APPLIED_AUGMENT_COMBINATIONS[@]}"; do
         if [ "$augmented" = "index" ]; then
-            load_cached_model_inference="${dataset_path}_${MODEL_NAME}_aug_features.pkl"
-            load_cached_model_inference_to_eval="${dataset_path}_${MODEL_NAME}_features.pkl"
+            load_cached_model_inference="${dataset_path}_${MODEL_NAME}_${AUG_FEATURES_PATH_SUFFIX}.pkl"
+            load_cached_model_inference_to_eval="${dataset_path}_${MODEL_NAME}_${PLAIN_FEATURES_PATH_SUFFIX}.pkl"
         elif [ "$augmented" = "index_query" ]; then
-            load_cached_model_inference="${dataset_path}_${MODEL_NAME}_aug_features.pkl"
-            load_cached_model_inference_to_eval="${dataset_path}_${MODEL_NAME}_aug_features.pkl"
+            load_cached_model_inference="${dataset_path}_${MODEL_NAME}_${AUG_FEATURES_PATH_SUFFIX}.pkl"
+            load_cached_model_inference_to_eval="${dataset_path}_${MODEL_NAME}_${AUG_FEATURES_PATH_SUFFIX}.pkl"
         elif [ "$augmented" = "query" ]; then
-            load_cached_model_inference="${dataset_path}_${MODEL_NAME}_features.pkl"
-            load_cached_model_inference_to_eval="${dataset_path}_${MODEL_NAME}_aug_features.pkl"
+            load_cached_model_inference="${dataset_path}_${MODEL_NAME}_${PLAIN_FEATURES_PATH_SUFFIX}.pkl"
+            load_cached_model_inference_to_eval="${dataset_path}_${MODEL_NAME}_${AUG_FEATURES_PATH_SUFFIX}.pkl"
         else
             echo "Unknown augment combination ${augmented}, exiting ..."
             exit 1
@@ -60,7 +64,7 @@ for dataset_path in "${DATASET_PATHS[@]}"; do
                 exit 1
             fi
 
-            OUTPUT_PATH="${OUTPUT_DIR}/results_${dataset_name}_${augmented}_${pred_strategy_type}.json"
+            OUTPUT_PATH="${OUTPUT_DIR}/results_${dataset_name}_${augmented}_${pred_strategy_type}_${AUG_FEATURES_PATH_SUFFIX}.json"
             echo ""
             echo "Running ${pred_strategy_type} strategy with augmented ${augmented} on dataset ${dataset_name}"
             echo "Output will be saved to ${OUTPUT_PATH}"

@@ -9,6 +9,20 @@ from datasets import Dataset
 CSV_IMAGE_COLUMN = "image"
 CSV_ID_COLUMN = "lesion_id"
 
+MILK10k_LABELS = [
+    "akiec",
+    "bcc",
+    "ben_oth",
+    "bkl",
+    "df",
+    "inf",
+    "mal_oth",
+    "mel",
+    "nv",
+    "sccka",
+    "vasc"
+]
+
 
 def format_isic_submission(
     predictions: Union[list[int], dict[str, int]],

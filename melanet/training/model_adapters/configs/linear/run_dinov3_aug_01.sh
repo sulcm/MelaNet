@@ -1,15 +1,15 @@
 python run_model_adapters_training.py \
-    --adapter_output_path /home/sulcm/models/melanet/adapters/test_DermLIP_aug_lin_probe.pt \
+    --adapter_output_path /home/sulcm/models/melanet/adapters/linear/dinov3_vit/DINOv3_aug_lin_probe_01.pt \
     --adapter_type linear \
-    --adapter_config "in_features=512,out_features=11" \
-    --dataset_name /home/sulcm/datasets/milk10k/SpilledMILK10k_DermLIP_all_aug_features \
+    --adapter_config "in_features=1280,out_features=11" \
+    --dataset_name /home/sulcm/datasets/milk10k/SpilledMILK10k_DINOv3_all_aug_features \
     --feature_column_names melanet_features_zero_shot_embeddings \
     --label_column_name label \
     --task multiclass \
     --remove_unused_columns False \
     --overwrite_output_dir \
     --num_train_epochs 30 \
-    --learning_rate 3.33e-4 \
+    --learning_rate 5e-4 \
     --lr_scheduler_type constant \
     --weight_decay 1e-5 \
     --per_device_train_batch_size 64 \
@@ -29,6 +29,6 @@ python run_model_adapters_training.py \
     --do_eval \
     --fp16 \
     --report_to tensorboard \
-    --logging_dir ./tensorboard_logs/Linear-Adapters \
+    --logging_dir ./tensorboard_logs/Linear-Adapters/DINOv3 \
     --dataloader_num_workers 4 \
     --seed 42

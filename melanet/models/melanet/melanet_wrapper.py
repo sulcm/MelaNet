@@ -192,10 +192,14 @@ class MelaNet():
                 "Error while extracting logits. Check your model inicialization."
             )
 
+        logits = tensor2numpy(logits)
+        if self.prediction_mapping is not None:
+            logits = self.prediction_mapping(logits)
+
         if return_logits:
-            return tensor2numpy(logits)
+            return logits
         else:
-            predicted_class_idx = tensor2numpy(logits.argmax(-1))
+            predicted_class_idx = logits.argmax(-1)
             return predicted_class_idx
 
     def extract_features(self, image, text = None, **kwargs) -> Union[torch.Tensor, FeatureExtractorOutput]:

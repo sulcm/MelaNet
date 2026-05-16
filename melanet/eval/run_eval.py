@@ -38,7 +38,7 @@ from melanet.mapping import convert_milk10k2ham10000_preds
 from melanet.functional.softmax import softmax
 from melanet.utils import tensor2value, kwargs2cli
 from melanet.inference import run_inference
-from formatter.isic import format_isic_submission
+from formatter.isic import format_isic_submission, MILK10k_LABELS
 from metacentrum_utils import METACENTRUM_SCRATCH_PREFIX, load_dataset_from_scratch, resolve_model_scratch_path
 
 
@@ -366,6 +366,15 @@ def get_labels(dataset: Dataset, model: MelaNet, eval_args: EvaluateArguments) -
             )
     else:
         labels = model.get_labels()
+
+    if not labels and "milk10k" in eval_args.dataset_name.lower():
+        # dirty workaround
+        logger.warning(
+            "Could not automatically infer labels from dataset or model, but 'milk10k' was found in `dataset_name` "
+            f"so falling back to pre-defined set of labels: {MILK10k_LABELS}"
+        )
+        labels = MILK10k_LABELS
+
     return labels
 
 
