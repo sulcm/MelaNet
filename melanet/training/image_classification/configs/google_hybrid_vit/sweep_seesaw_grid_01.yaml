@@ -1,5 +1,5 @@
-name: Sweep-MelanoMix-Grid-Swin-v2
-description: "Swin Transformer v2 Base MelanoMix grid search sweep training"
+name: Sweep-SeeSaw-Grid-GoogleHybridViT
+description: "GoogleHybridViT grid search sweep training with SeeSaw loss"
 method: grid
 metric:
   goal: minimize
@@ -7,14 +7,14 @@ metric:
 parameters:
   # Model:
   model_name_or_path:
-    value: "timm/swinv2_base_window12to24_192to384.ms_in22k_ft_in1k"
+    value: "/storage/plzen4-ntis/home/sulcm01/outputs/google_hybrid_vit/base"
   ignore_mismatched_sizes:
     value: True
   fp16:
     value: True
   # Dataset:
   dataset_name:
-    value: "metacentrum_scratch/MelanoMix"
+    value: "metacentrum_scratch/SpilledMILK10k"
   image_column_name:
     value: "image"
   label_column_name:
@@ -25,7 +25,7 @@ parameters:
   classification_task:
     value: "multiclass"
   output_dir:
-    value: "/storage/plzen4-ntis/home/sulcm01/outputs/swinv2_base/melanet_swinv2_base_melanomix_grid"
+    value: "/storage/plzen4-ntis/home/sulcm01/outputs/google_hybrid_vit/melanet_hvit_seesaw_grid"
   overwrite_output_dir:
     value: True
   save_steps:
@@ -41,7 +41,7 @@ parameters:
   logging_strategy:
     value: "steps"
   logging_steps:
-    value: 200
+    value: 100
   do_train:
     value: True
   do_eval:
@@ -63,8 +63,6 @@ parameters:
     value: 0.75
   weight_decay:
     value: 1e-5
-  final_dropout:
-    value: 0.2
   hidden_dropout:
     value: 0.1
   drop_path_rate:
@@ -73,15 +71,17 @@ parameters:
     value: "cosine"
   warmup_ratio:
     value: 0.05
+  seesaw_loss_multiplier:
+    value: 1.0
   per_device_train_batch_size:
-    values: [8, 16]
+    values: [32, 64]
   gradient_accumulation_steps:
-    value: 4
+    value: 1
   per_device_eval_batch_size:
-    value: 32
+    value: 64
   eval_strategy:
     value: "steps"
   eval_steps:
-    value: 2500
+    value: 1000
   save_strategy:
     value: "steps"
