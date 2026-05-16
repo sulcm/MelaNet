@@ -1,5 +1,5 @@
-name: Sweep-Grid-Attn-Ensemble-ViT-ResNet
-description: "Grid search sweep training of attn. ensemble of fine-tuned ViT and ResNet50 models"
+name: Sweep-Grid-Concat-Ensemble-SwinV2-CAFormer
+description: "Grid search sweep training of concat. ensemble of fine-tuned Swin V2 and CAFormer S18 models"
 method: grid
 metric:
   goal: minimize
@@ -9,11 +9,11 @@ parameters:
   adapter_type:
     value: "fusion"
   adapter_config:
-    value: "{\"in_features\":[768,2048],\"out_features\":11,\"use_attn\":true,\"attn_num_heads\":2,\"dropout\":0.1,\"modality_dropout\":0.05,\"drop_path_rate\":0.1}"
+    value: "{\"in_features\":[1024,512],\"out_features\":11,\"dropout\":0.1,\"modality_dropout\":0.05,\"drop_path_rate\":0.1}"
   model_name_or_path:
-    value: "metacentrum_scratch/melanet_vit_base_fine_grid-dxjjru4m"
+    value: "metacentrum_scratch/melanet_swinv2_base_grid-g3ki3vjd"
   zero_shot_model_name_or_path:
-    value: "metacentrum_scratch/melanet_resnet50_fine_grid-n5511yzn"
+    value: "metacentrum_scratch/melanet_caformer_s18_fine_grid-76v09gjq"
   zero_shot_config:
     value: "model_backend=hf"
   # Dataset:
@@ -29,7 +29,7 @@ parameters:
   task:
     value: "multiclass"
   output_dir:
-    value: "/storage/plzen4-ntis/home/sulcm01/outputs/adapters/ViT_base_ResNet50_fusion_attn"
+    value: "/storage/plzen4-ntis/home/sulcm01/outputs/adapters/swinv2_base_caformer_s18_fusion_concat"
   overwrite_output_dir:
     value: True
   save_steps:
@@ -70,11 +70,11 @@ parameters:
   lr_scheduler_type:
     value: "constant"
   per_device_train_batch_size:
-    values: [64, 128]
+    values: [16, 32]
   gradient_accumulation_steps:
-    value: 1
+    value: 4
   per_device_eval_batch_size:
-    value: 256
+    value: 64
   eval_strategy:
     value: "steps"
   eval_steps:
