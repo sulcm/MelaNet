@@ -1,4 +1,4 @@
-transformers>=4.57.1
+transformers>=4.57.1,<5.0.0
 datasets>=4.3.0
 accelerate>=1.11.0
 torch>=2.9.0
@@ -10,4 +10,5 @@ faiss-cpu>=1.13.0
 evaluate
 scikit-learn
 wandb
+tensorboard
 matplotlib

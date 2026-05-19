@@ -31,6 +31,15 @@ class ZeroShotModel():
                 device=self.device
             )
 
+    def freeze_parameters(self):
+        self.zero_shot_wrapper.freeze_parameters()
+
+    def eval(self):
+        return self.zero_shot_wrapper.eval()
+
+    def to(self, *args, **kwargs):
+        return self.zero_shot_wrapper.to(*args, **kwargs)
+
     def extract_features(self, image, **kwargs):
         return self.zero_shot_wrapper.extract_features(
             image=image,

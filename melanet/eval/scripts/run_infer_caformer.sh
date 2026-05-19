@@ -1,0 +1,13 @@
+python run_eval.py \
+    --classification_task "multiclass" \
+    --run_inference_only True \
+    --eval_as_feature_extraction True \
+    --model_name_or_path "/home/sulcm/models/melanet/caformer_s18/melanet_caformer_s18_fine_grid-76v09gjq" \
+    --dataset_name "/home/sulcm/datasets/milk10k/SpilledMILK10k" \
+    --eval_split "validation" \
+    --index_name "/home/sulcm/datasets/milk10k/SpilledMILK10k" \
+    --index_split "train" \
+    --id_column_name "isic_id" \
+    --label_column_name "label" \
+    --batch_size 128 \
+    --cache_model_inference "/home/sulcm/datasets/milk10k/milk10k_caformer_s18_features.pkl"

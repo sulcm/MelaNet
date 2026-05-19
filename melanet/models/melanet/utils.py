@@ -3,6 +3,8 @@ import numpy as np
 
 from typing import Union
 from numbers import Number
+from pathlib import Path
+from datetime import datetime, UTC
 
 
 def tensor2numpy(t: torch.Tensor) -> np.ndarray:
@@ -34,3 +36,14 @@ def kwargs2cli(**kwargs) -> str:
         for key_args, value_arg in kwargs.items()
     ]
     return ",".join(cli_args) if cli_args else ""
+
+
+def handle_existing_path(path: Union[str, Path]) -> str:
+    _path = Path(path)
+
+    if _path.exists():
+        timestamp = datetime.now(tz=UTC).strftime("%Y%m%d_%H%M%S")
+        new_filename = f"{timestamp}_{_path.name}"
+        _path = _path.with_name(new_filename)
+
+    return str(_path)

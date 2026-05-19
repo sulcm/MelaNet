@@ -1,18 +1,26 @@
-from typing import Optional
+import json
+
+from typing import Optional, Union
 from pydantic import BaseModel, Field
 
 
 class FeatureAdapterConfig(BaseModel):
     out_features: int = Field(...)
-    in_features_A: Optional[int] = Field(default=None)
-    in_features_B: Optional[int] = Field(default=None)
-    bias: Optional[bool] = Field(default=False)
-    input_l2_norm: Optional[bool] = Field(default=False)
-    output_l2_norm: Optional[bool] = Field(default=True)
-    whiten: Optional[bool] = Field(default=False)
-    hidden_dim: Optional[int] = Field(default=1024)
-    dropout: Optional[float] = Field(default=0.1)
-    hidden_act: Optional[str] = Field(default="gelu")
+    in_features: Union[int, list[int], None] = Field(default=None)
+    bias: Optional[bool] = Field(default=None)
+    input_l2_norm: Optional[bool] = Field(default=None)
+    output_l2_norm: Optional[bool] = Field(default=None)
+    input_norm: Optional[bool] = Field(default=None)
+    whiten: Optional[bool] = Field(default=None)
+    hidden_dim: Optional[int] = Field(default=None)
+    dropout: Optional[float] = Field(default=None)
+    modality_dropout: Optional[float] = Field(default=None)
+    hidden_act: Optional[str] = Field(default=None)
+    use_attn: Optional[bool] = Field(default=None)
+    attn_num_heads: Optional[int] = Field(default=None)
+    attn_dropout: Optional[float] = Field(default=None)
+    drop_path_rate: Optional[float] = Field(default=None)
+    drop_path_mode: Optional[str] = Field(default=None)
     seed: Optional[int] = Field(default=42)
 
     @classmethod
@@ -23,6 +31,15 @@ class FeatureAdapterConfig(BaseModel):
                 key, value = mapping.split("=")
                 init_kwargs[key] = value
         return cls(**init_kwargs)
+
+    @classmethod
+    def from_args(cls, args: str) -> "FeatureAdapterConfig":
+        try:
+            _config_kwargs = json.loads(args)
+            _config = cls(**_config_kwargs)
+        except Exception:
+            _config = cls.from_cli(args)
+        return _config
 
 
 def create_default_feature_adapter_config(out_features: int, **kwargs) -> FeatureAdapterConfig:

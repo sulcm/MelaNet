@@ -3,10 +3,11 @@ import torch
 
 from typing import Optional
 
-from timm.data import resolve_data_config, create_transform
+from timm.data import resolve_model_data_config, create_transform
 
 from ..config import ZeroShotConfig, create_default_zero_shot_config
 from ...embeddings.utils import normalize_embeddings
+from ...image_utils import make_flat_list_of_images, ensure_pil_image
 from ...utils import resolve_device
 
 
@@ -23,12 +24,10 @@ class TimmModelWrapper():
             global_pool=self.config.global_pool,
             pretrained_strict=False
         )
-        self.model = self.model.eval().to(self.device)
+        self.model.eval().to(self.device)
 
-        model_config = resolve_data_config(
-            pretrained_cfg=self.model.pretrained_cfg if hasattr(self.model, "pretrained_cfg") else self.model.default_cfg,
-            args=None,
-            model=None,
+        model_config = resolve_model_data_config(
+            self.model,
             use_test_size=True
         )
         self.image_processor = create_transform(
@@ -40,15 +39,32 @@ class TimmModelWrapper():
             transform.__class__.__name__ == "ToTensor" for transform in self.image_processor.transforms
         )
 
+    def freeze_parameters(self):
+        for param in self.model.parameters():
+            param.requires_grad = False
+
+    def eval(self):
+        self.model.eval()
+        return self
+
+    def to(self, *args, **kwargs):
+        self.model.to(*args, **kwargs)
+        return self
+
     def extract_features(self, image, **kwargs):
-        if not isinstance(image, list):
-            image = [image,]
-        if self._not_supports_tensor_input:
-            image_tensor_proc = torch.stack(
-                [self.image_processor(im) for im in image]
-            )
-        else:
+        if self._not_supports_tensor_input and isinstance(image, torch.Tensor):
+            image = image.cpu().numpy()
+
+        if isinstance(image, torch.Tensor):
             image_tensor_proc = self.image_processor(image)
+            image_tensor_proc = image_tensor_proc.unsqueeze(0) if image_tensor_proc.ndim == 3 else image_tensor_proc
+        else:
+            image = make_flat_list_of_images(image)
+            image_tensor_proc = torch.stack([
+                self.image_processor(
+                    ensure_pil_image(im)
+                ) for im in image
+            ])
 
         image_features = self.model(
             image_tensor_proc.to(self.device)

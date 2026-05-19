@@ -10,6 +10,10 @@ class VectorStoreConfig(BaseModel):
         default="ip",
         description="Metric for similarity search in created index. Defaults to 'ip'."
     )
+    l2_normalize: bool = Field(
+        default=False,
+        description="Apply L2 normalization on embeddings before indexing and on passed queries. Defaults to `False`."
+    )
     pca_components: Union[Optional[int], list[Optional[int]]] = Field(
         default=None,
         description="Optional use of PCA for dimension reduction during index build and search. Turn OFF using `None`."
@@ -22,9 +26,13 @@ class VectorStoreConfig(BaseModel):
         default=20,
         description="Search for K closest elements in index. Only applied if `top_k > 1`."
     )
-    return_distances: Optional[bool] = Field(
+    unique_only: Optional[bool] = Field(
         default=False,
-        description="Whether to return tuple `[(class, distance), ...]` or only `[class, ...]`."
+        description="Retrive only unique (with best score) representants to given query. Applies only when `top_k > 1`."
+    )
+    return_scores: Optional[bool] = Field(
+        default=False,
+        description="Whether to return tuple `[(class, score), ...]` or only `[class, ...]`."
     )
     rerank_top_n: Optional[int] = Field(
         default=1,

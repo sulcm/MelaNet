@@ -11,8 +11,12 @@ class ZeroShotConfig(BaseModel):
         - "concat": concatenates embeddings into single vector `[image_embeds, text_embeds]`"""
     )
     normalize_output: Optional[bool] = Field(
-        default=True,
-        description="Whether to apply L2 normalization to embeddings vectors. Defaults to `True`."
+        default=False,
+        description="Whether to apply L2 normalization to embeddings vectors. Defaults to `False`."
+    )
+    pre_norm: Optional[bool] = Field(
+        default=False,
+        description="Do L2 normalization before applying merging strategies of embeddings (output_type in ['sum', 'concat']). Defaults to `False`."
     )
     alpha: Optional[float] = Field(
         default=None,

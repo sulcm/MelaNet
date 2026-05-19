@@ -1,0 +1,1 @@
+from .ham10000 import convert_milk10k2ham10000_preds, MILK10k2HAM10000_MAPPING

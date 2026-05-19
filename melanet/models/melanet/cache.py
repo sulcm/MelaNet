@@ -1,20 +1,23 @@
 import os
-import torch
+import pickle
 import traceback
 import numpy as np
+import pandas as pd
 
-from typing import TypeVar, Generic, Optional, Union, Any, TypedDict
+from typing import TypeVar, Generic, Optional, Any, TypedDict
 from dataclasses import dataclass
 
 
 T = TypeVar("T")
 
 class ClassifierCache(TypedDict):
-    logits: np.ndarray
+    logits: dict[str, list[np.ndarray]]
 
 class FeatureExtractorCache(TypedDict):
-    index: dict[str, torch.Tensor]
-    eval_dataset: dict[str, torch.Tensor]
+    index: pd.DataFrame
+    eval_dataset: pd.DataFrame
+
+MetadataType = dict[str, Any]
 
 
 @dataclass
@@ -25,19 +28,19 @@ class CacheManager(Generic[T]):
     Internal structure:
     {
         "cache": T,
-        "metadata": dict[str, Any]
+        "metadata": MetadataType
     }
     """
 
     _cache: T
-    _metadata: dict[str, Any]
+    _metadata: MetadataType
 
     @property
     def cache(self) -> T:
         return self._cache
 
     @property
-    def metadata(self) -> dict[str, Any]:
+    def metadata(self) -> MetadataType:
         return self._metadata
 
     @staticmethod
@@ -45,7 +48,7 @@ class CacheManager(Generic[T]):
         *,
         path: str,
         cache: T,
-        metadata: Optional[dict[str, Any]] = None
+        metadata: Optional[MetadataType] = None
     ) -> None:
         """
         Save arbitrary cache object and optional metadata.
@@ -60,15 +63,15 @@ class CacheManager(Generic[T]):
                     **(metadata or {})
                 }
             }
-            torch.save(payload, path)
+            with open(path, "wb") as f:
+                pickle.dump(payload, f, protocol=pickle.HIGHEST_PROTOCOL)
         except Exception:
             print(f"ERROR - CacheManager - {traceback.format_exc()}")
 
     @classmethod
     def load(
         cls,
-        path: str,
-        device: Union[str, torch.device] = "cpu"
+        path: str
     ) -> "CacheManager[T]":
         """
         Load and validate cache file.
@@ -76,7 +79,8 @@ class CacheManager(Generic[T]):
         if not os.path.exists(path):
             raise FileNotFoundError(path)
 
-        payload = torch.load(path, map_location=device, weights_only=False)
+        with open(path, "rb") as f:
+            payload = pickle.load(f)
 
         if "cache" not in payload:
             raise ValueError("Invalid cache structure.")

@@ -1,16 +1,19 @@
 import torch
 import numpy as np
 
-from typing import Optional, Union
+from typing import Optional, Union, Callable
 
 from transformers import AutoImageProcessor, AutoModelForImageClassification
 
 from .embeddings.config import FeatureExtractorConfig, create_default_feature_extractor_config
 from .embeddings.types import FeatureExtractorOutput
+from .embeddings.utils import normalize_embeddings
 
 from .zero_shot.config import ZeroShotConfig, create_default_zero_shot_config
 from .zero_shot.models.hf_wrapper import HfModelWrapper
 from .zero_shot.zero_shot_wrapper import ZeroShotModel
+
+from .adapters.adapter_wrapper import AdapterWrapper
 
 from .utils import tensor2numpy, resolve_device
 
@@ -23,31 +26,97 @@ class MelaNet():
         feature_extractor_config: Optional[FeatureExtractorConfig] = None,
         zero_shot_model_name: Optional[str] = None,
         zero_shot_config: Optional[ZeroShotConfig] = None,
+        ft_model_adapter_name: Optional[str] = None,
+        zero_shot_model_adapter_name: Optional[str] = None,
+        models_fusion_adapter_name: Optional[str] = None,
+        prediction_mapping: Optional[Callable[[np.ndarray], np.ndarray]] = None,
         device: str = "cuda"
     ):
         self.device = resolve_device(device)
         self.is_feature_extractor = is_feature_extractor
+        self.has_adapters = (
+            ft_model_adapter_name is not None or
+            zero_shot_model_adapter_name is not None or
+            models_fusion_adapter_name is not None
+        )
+        self.prediction_mapping = prediction_mapping
 
-        if self.is_feature_extractor:
+        if self.is_feature_extractor or self.has_adapters:
             assert model_name is not None or zero_shot_model_name is not None, "At least one of `model_name` or `zero_shot_model_name` must be provided"
             self.__feature_extractor_config = feature_extractor_config if feature_extractor_config is not None else create_default_feature_extractor_config()
             if model_name is not None:
                 self.ft_model = HfModelWrapper(model_name=model_name, config=zero_shot_config, device=self.device)
+
+                self.ft_model_adapter = AdapterWrapper.from_pretrained(ft_model_adapter_name) if ft_model_adapter_name is not None else None
+                if self.ft_model_adapter is not None:
+                    self.ft_model_adapter.eval().to(self.device)
             else:
                 self.ft_model = None
+                self.ft_model_adapter = None
+
             if zero_shot_model_name is not None:
                 zero_shot_config = zero_shot_config if zero_shot_config is not None else create_default_zero_shot_config()
                 self.zero_shot_model = ZeroShotModel(model_name=zero_shot_model_name, config=zero_shot_config, device=self.device)
+
+                self.zero_shot_model_adapter = AdapterWrapper.from_pretrained(zero_shot_model_adapter_name) if zero_shot_model_adapter_name is not None else None
+                if self.zero_shot_model_adapter is not None:
+                    self.zero_shot_model_adapter.eval().to(self.device)
             else:
                 self.zero_shot_model = None
+                self.zero_shot_model_adapter = None
+
+            if model_name is not None and zero_shot_model_name is not None:
+                self.models_fusion_adapter = AdapterWrapper.from_pretrained(models_fusion_adapter_name) if models_fusion_adapter_name is not None else None
+                if self.models_fusion_adapter is not None:
+                    self.models_fusion_adapter.eval().to(self.device)
+            else:
+                self.models_fusion_adapter = None
+
+            if self.has_adapters and self.models_fusion_adapter is None:
+                if self.ft_model is not None:
+                    assert self.ft_model_adapter is not None, "When using fine-tuned model with adapetrs you must provide one in `ft_model_adapter_name`"
+                if self.zero_shot_model is not None:
+                    assert self.zero_shot_model_adapter is not None, "When using fine-tuned model with adapetrs you must provide one in `zero_shot_model_adapter_name`"
         else:
             assert model_name is not None, "For classification must specify fine-tuned model name using `model_name` parameter"
             self.image_processor = AutoImageProcessor.from_pretrained(model_name)
             self.model = AutoModelForImageClassification.from_pretrained(model_name)
             self.model.eval().to(self.device)
 
+    def freeze_parameters(self):
+        if self.is_feature_extractor:
+            if self.ft_model is not None:
+                self.ft_model.freeze_parameters()
+            if self.zero_shot_model is not None:
+                self.zero_shot_model.freeze_parameters()
+        else:
+            for param in self.model.parameters():
+                param.requires_grad = False
+
+    def eval(self):
+        if self.is_feature_extractor:
+            if self.ft_model is not None:
+                self.ft_model.eval()
+            if self.zero_shot_model is not None:
+                self.zero_shot_model.eval()
+        else:
+            self.model.eval()
+        return self
+
+    def to(self, *args, **kwargs):
+        if self.is_feature_extractor:
+            if self.ft_model is not None:
+                self.ft_model.to(*args, **kwargs)
+            if self.zero_shot_model is not None:
+                self.zero_shot_model.to(*args, **kwargs)
+        else:
+            self.model.to(*args, **kwargs)
+        return self
+
     def get_labels(self) -> Optional[list[str]]:
         if self.is_feature_extractor:
+            return None
+        elif self.has_adapters:
             return None
         else:
             # Each model initialized from `AutoModelForImageClassification` has config `PreTrainedConfig` with `label2id` attribute
@@ -64,7 +133,7 @@ class MelaNet():
 
     @property
     def zero_shot_config(self) -> Optional[ZeroShotConfig]:
-        if self.is_feature_extractor:
+        if self.is_feature_extractor or self.has_adapters:
             if self.zero_shot_model is not None:
                 return self.zero_shot_model.config
             else:
@@ -72,18 +141,68 @@ class MelaNet():
         else:
             return None
 
-    def forward(self, image, return_logits: bool = False) -> np.ndarray:
+    def forward(self, image, return_logits: bool = False, **kwargs) -> np.ndarray:
         inputs = self.image_processor(images=image, return_tensors="pt").to(self.device)
         outputs = self.model(**inputs)
 
-        logits = outputs.logits
+        logits = tensor2numpy(outputs.logits)
+        if self.prediction_mapping is not None:
+            logits = self.prediction_mapping(logits)
+
         if return_logits:
-            return tensor2numpy(logits)
+            return logits
         else:
-            predicted_class_idx = tensor2numpy(logits.argmax(-1))
+            predicted_class_idx = logits.argmax(-1)
             return predicted_class_idx
 
-    def extract_features(self, image, text = None) -> Union[torch.Tensor, FeatureExtractorOutput]:
+    def forward_with_adapters(self, image, return_logits: bool = False, text = None, **kwargs) -> np.ndarray:
+        if self.ft_model is not None:
+            ft_embeds = self.ft_model.extract_features(image=image)
+        else:
+            ft_embeds = None
+
+        if self.zero_shot_model is not None:
+            zero_shot_embeds = self.zero_shot_model.extract_features(image=image, text=text)
+        else:
+            zero_shot_embeds = None
+
+        if ft_embeds is not None and self.ft_model_adapter is not None:
+            ft_model_adapter_output = self.ft_model_adapter.forward(ft_embeds)
+            ft_embeds = ft_model_adapter_output.adapter_output
+        if zero_shot_embeds is not None and self.zero_shot_model_adapter is not None:
+            zero_shot_model_adapter_output = self.zero_shot_model_adapter.forward(zero_shot_embeds)
+            zero_shot_embeds = zero_shot_model_adapter_output.adapter_output
+
+        if (
+            (ft_embeds is not None and zero_shot_embeds is not None)
+            and
+            self.models_fusion_adapter is not None
+        ):
+            models_fusion_adapter_output = self.models_fusion_adapter.forward([
+                ft_embeds,
+                zero_shot_embeds
+            ])
+            logits = models_fusion_adapter_output.adapter_output
+        elif ft_embeds is not None and self.ft_model_adapter is not None:
+            logits = ft_embeds
+        elif zero_shot_embeds is not None and self.zero_shot_model_adapter is not None:
+            logits = zero_shot_embeds
+        else:
+            raise ValueError(
+                "Error while extracting logits. Check your model inicialization."
+            )
+
+        logits = tensor2numpy(logits)
+        if self.prediction_mapping is not None:
+            logits = self.prediction_mapping(logits)
+
+        if return_logits:
+            return logits
+        else:
+            predicted_class_idx = logits.argmax(-1)
+            return predicted_class_idx
+
+    def extract_features(self, image, text = None, **kwargs) -> Union[torch.Tensor, FeatureExtractorOutput]:
         if self.ft_model is not None:
             ft_embeds = self.ft_model.extract_features(image=image)
         else:
@@ -98,23 +217,53 @@ class MelaNet():
             ft_embeddings=ft_embeds,
             zero_shot_embeddings=zero_shot_embeds
         )
+
+        if output.have_ft_embeddings() and self.ft_model_adapter is not None:
+            ft_model_adapter_output = self.ft_model_adapter.forward(output.ft_embeddings)
+            output.ft_embeddings = ft_model_adapter_output.adapter_output
+        if output.have_zero_shot_embeddings() and self.zero_shot_model_adapter is not None:
+            zero_shot_model_adapter_output = self.zero_shot_model_adapter.forward(output.zero_shot_embeddings)
+            output.zero_shot_embeddings = zero_shot_model_adapter_output.adapter_output
+        if (
+            (output.have_ft_embeddings() and output.have_zero_shot_embeddings())
+            and
+            self.models_fusion_adapter is not None
+        ):
+            models_fusion_adapter_output = self.models_fusion_adapter.forward([
+                output.ft_embeddings,
+                output.zero_shot_embeddings
+            ])
+            fused_output = models_fusion_adapter_output.adapter_output
+            return normalize_embeddings(fused_output) if self.__feature_extractor_config.normalize_output else fused_output
+
         if self.__feature_extractor_config.output_type == "object":
-            return output
+            return output.l2_normalize() if self.__feature_extractor_config.normalize_output else output
         elif self.__feature_extractor_config.output_type == "sum":
             return output.sum(
-                alpha=self.__feature_extractor_config.alpha
+                alpha=self.__feature_extractor_config.alpha,
+                normalize=self.__feature_extractor_config.normalize_output,
+                pre_norm=self.__feature_extractor_config.pre_norm
             )
         elif self.__feature_extractor_config.output_type == "concat":
-            return output.concat()
+            return output.concat(
+                normalize=self.__feature_extractor_config.normalize_output,
+                pre_norm=self.__feature_extractor_config.pre_norm
+            )
         else:
             raise ValueError(
                 "Unsupported `output_type` for zero-shot feature extraction. Must be one of: 'object', 'sum', 'concat'"
             )
 
-    def __call__(self, image, *, text = None, return_logits: bool = False):
+    def __call__(self, image, *, text = None, return_logits: bool = False, **kwargs):
         if self.is_feature_extractor:
             return self.extract_features(
                 image=image,
+                text=text
+            )
+        elif self.has_adapters:
+            return self.forward_with_adapters(
+                image=image,
+                return_logits=return_logits,
                 text=text
             )
         else:

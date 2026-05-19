@@ -1,0 +1,34 @@
+python run_model_adapters_training.py \
+    --adapter_output_path /home/sulcm/models/melanet/adapters/test_ViT_base_DermLIP_fusion_concat.pt \
+    --adapter_type fusion \
+    --adapter_config "{\"in_features\":[768,512],\"out_features\":11,\"dropout\":0.1,\"modality_dropout\":0.05,\"drop_path_rate\":0.1}" \
+    --dataset_name /home/sulcm/datasets/milk10k/MILK10k_ViT_base_DermLIP_features \
+    --feature_column_names "melanet_features_ft_embeddings,melanet_features_zero_shot_embeddings" \
+    --label_column_name label \
+    --task multiclass \
+    --remove_unused_columns False \
+    --overwrite_output_dir \
+    --num_train_epochs 30 \
+    --learning_rate 2e-6 \
+    --lr_scheduler_type constant \
+    --weight_decay 1e-5 \
+    --per_device_train_batch_size 128 \
+    --per_device_eval_batch_size 256 \
+    --gradient_accumulation_steps 1 \
+    --logging_strategy steps \
+    --logging_steps 100 \
+    --eval_strategy steps \
+    --eval_steps 500 \
+    --save_strategy steps \
+    --save_steps 5000 \
+    --save_total_limit 2 \
+    --load_best_model_at_end True \
+    --metric_for_best_model eval_loss \
+    --greater_is_better False \
+    --do_train \
+    --do_eval \
+    --fp16 \
+    --report_to tensorboard \
+    --logging_dir ./tensorboard_logs/Fusion-Concat-Adapters \
+    --dataloader_num_workers 4 \
+    --seed 42

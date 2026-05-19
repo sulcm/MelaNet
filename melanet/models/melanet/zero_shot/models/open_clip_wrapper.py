@@ -5,6 +5,7 @@ from typing import Optional
 
 from ..config import ZeroShotConfig, create_default_zero_shot_config
 from ...embeddings.utils import normalize_embeddings
+from ...image_utils import make_flat_list_of_images, ensure_pil_image
 from ...utils import resolve_device
 
 
@@ -23,19 +24,37 @@ class OpenCLIPWrapper():
             transform.__class__.__name__ == "ToTensor" for transform in self.image_processor.transforms
         )
 
-    def extract_features(self, image, text=None):
-        if not isinstance(image, list):
-            image = [image,]
-        if self._not_supports_tensor_input:
-            image_tensor_proc = torch.stack(
-                [self.image_processor(im) for im in image]
-            )
-        else:
+    def freeze_parameters(self):
+        for param in self.model.parameters():
+            param.requires_grad = False
+
+    def eval(self):
+        self.model.eval()
+        return self
+
+    def to(self, *args, **kwargs):
+        self.model.to(*args, **kwargs)
+        return self
+
+    def extract_features(self, image, text=None, **kwargs):
+        if self._not_supports_tensor_input and isinstance(image, torch.Tensor):
+            image = image.cpu().numpy()
+
+        if isinstance(image, torch.Tensor):
             image_tensor_proc = self.image_processor(image)
+            image_tensor_proc = image_tensor_proc.unsqueeze(0) if image_tensor_proc.ndim == 3 else image_tensor_proc
+        else:
+            image = make_flat_list_of_images(image)
+            image_tensor_proc = torch.stack([
+                self.image_processor(
+                    ensure_pil_image(im)
+                ) for im in image
+            ])
+
         image_features = self.model.encode_image(
             image_tensor_proc.to(self.device)
         )
-        if self.config.normalize_output:
+        if self.config.pre_norm:
             image_features = normalize_embeddings(image_features)
 
         if self.config.add_text_embeddings and text is not None:
@@ -45,13 +64,15 @@ class OpenCLIPWrapper():
             text_features = self.model.encode_text(
                 text_tensor_proc.to(self.device)
             )
-            if self.config.normalize_output:
+            if self.config.pre_norm:
                 text_features = normalize_embeddings(text_features)
         else:
             text_features = None
 
         if text_features is None:
-            return image_features
+            return normalize_embeddings(
+                image_features
+            ) if self.config.normalize_output else image_features
         else:
             if self.config.output_type == "sum":
                 extracted_features = self.config.alpha * image_features + (1.0 - self.config.alpha) * text_features
