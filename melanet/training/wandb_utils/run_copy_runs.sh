@@ -38,5 +38,6 @@ for src_project in "${SRC_PROJECTS[@]}"; do
         --src-entity "${SRC_ENTITY}" \
         --src-project "${src_project}" \
         --dst-entity "${DST_ENTITY}" \
-        --dst-project "${DST_PROJECT}"
+        --dst-project "${DST_PROJECT}" \
+        --prj-name-as-tag
 done
