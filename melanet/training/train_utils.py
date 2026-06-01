@@ -1,7 +1,9 @@
 import ast
 import string
+import math
 import inspect
 import secrets
+import numpy as np
 
 from typing import get_origin, get_args, Union, Any
 from enum import Enum
@@ -12,7 +14,7 @@ from transformers import TrainerCallback
 
 
 INTERPRET_TRUE = {"1", "true", "yes", "on", "y", "t"}
-INTERPRET_NONE = {"", "None", "none", "null", None}
+INTERPRET_NONE = {"", "none", "null", "nil", "n/a", "nan"}
 
 
 class TrainerPhaseDetectorCallback(TrainerCallback):
@@ -75,6 +77,29 @@ def equal_types(a, b) -> bool:
     return a == b
 
 
+def is_none_like(value: Any) -> bool:
+    # Check actual None
+    if value is None:
+        return True
+
+    # Check numeric NaN
+    if isinstance(value, (int, float)) and math.isnan(value):
+        return True
+
+    # Check string representations
+    if isinstance(value, str) and value.strip().lower() in INTERPRET_NONE:
+        return True
+
+    # Check numpy NaN-like values
+    try:
+        if np.isnan(value):
+            return True
+    except TypeError:
+        pass
+
+    return False
+
+
 # Boolean parser that handles many formats
 def parse_bool(s: str) -> bool:
     return s.lower() in INTERPRET_TRUE
@@ -98,7 +123,7 @@ def coerce_value(value: str, annotation):
     # Handle Optional[T], Union[T, NoneType]
     if origin is Union and type(None) in args:
         non_none_type = next(t for t in args if t is not type(None))
-        if value in INTERPRET_NONE:
+        if is_none_like(value):
             return None
         return coerce_value(value, non_none_type)
 
